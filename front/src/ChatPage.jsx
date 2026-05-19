@@ -161,9 +161,7 @@ function LoginScreen({ onLogin }) {
             fontFamily: "'Nunito', sans-serif",
             fontSize: 14, fontWeight: 800,
             color: "#6b8fb5",
-            boxShadow: btnActive
-              ? neu(true, 4, 8)
-              : neu(false, 4, 8),
+            boxShadow: btnActive ? neu(true, 4, 8) : neu(false, 4, 8),
             transform: btnActive ? "scale(0.98)" : "scale(1)",
             transition: "all 0.15s",
           }}
@@ -181,57 +179,101 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [btnActive, setBtnActive] = useState(false);
   const bottomRef = useRef(null);
-  const messagesRef = useRef(null);
   const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
+  const [loaded, setLoaded] = useState(false);
 
- useEffect(() => {
-  if (messagesRef.current) {
-    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-  }
-}, [messages]);
-
+  // Скрол
   useEffect(() => {
-    fetch("http://localhost:7979/api/messages")
-      .then(res => res.json())
-      .then(data => setMessages(data));
-  }, []);
+    if (loaded && messages.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, loaded]);
 
-  
+  // Fetch + WebSocket
   useEffect(() => {
     if (!username) return;
+
+    fetch("http://localhost:7979/api/messages")
+      .then(res => res.json())
+      .then(data => {
+        setMessages(data);
+        setLoaded(true);
+      });
 
     const ws = new WebSocket("ws://localhost:7979/ws");
 
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      setMessages(prev => [...prev, msg]);
+      try {
+        const msg = JSON.parse(e.data);
 
-      if (msg.from !== username) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch(err => {
-          console.log("Автоплей заблоковано браузером або помилка файлу:", err);
+        setMessages(prev => {
+          // Якщо є тимчасове повідомлення від цього користувача — замінюємо його
+          const tempIndex = prev.findIndex(m =>
+            typeof m.id === 'string' && m.id.startsWith('temp-') && m.from === msg.from
+          );
+
+          if (tempIndex !== -1) {
+            const newMessages = [...prev];
+            newMessages[tempIndex] = msg;
+            return newMessages;
+          }
+
+          // Якщо звичайне повідомлення
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
         });
+
+        if (msg.from !== username) {
+          notificationSound.current.currentTime = 0;
+          notificationSound.current.play().catch(() => { });
+        }
+      } catch (err) {
+        console.error("JSON parse error:", err);
       }
     };
 
     return () => ws.close();
   }, [username]);
 
-  const send = () => {
+  const send = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || !username) return;
 
-    fetch("http://localhost:7979/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: username, text })
-    }).then(res => res.json());
+    const tempId = "temp-" + Date.now();
 
+    const tempMessage = {
+      id: tempId,
+      from: username,
+      text: text,
+      time: new Date().toISOString(),
+    };
+
+    setMessages(prev => [...prev, tempMessage]);
     setInput("");
+
+    try {
+      const res = await fetch("http://localhost:7979/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: username, text })
+      });
+
+      const savedMsg = await res.json();
+
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? savedMsg : m)
+      );
+    } catch (err) {
+      console.error("Не вдалося відправити", err);
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
   };
 
   const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
   };
 
   if (!username) {
@@ -267,37 +309,8 @@ export default function ChatPage() {
         }}>
 
           {/* Header */}
-          <div style={{
-            padding: "18px 20px",
-            display: "flex", alignItems: "center", gap: 12,
-          }}>
-            <div style={{ position: "relative" }}>
-              <div style={{
-                width: 44, height: 44, borderRadius: "50%",
-                background: NEU_BG,
-                boxShadow: neu(false, 4, 8),
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 14, fontWeight: 800, color: "#c084a0",
-              }}>SB</div>
-              <div style={{
-                position: "absolute", bottom: 1, right: 1,
-                width: 10, height: 10, borderRadius: "50%",
-                background: "#86efac",
-                boxShadow: `0 0 0 2px ${NEU_BG}`,
-              }}/>
-            </div>
-
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-                <span style={{ color: "#868e99" }}>Bouble</span> Chat
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
-            </div>
-
-            <div style={{
-              marginLeft: "auto",
-              fontSize: 12, fontWeight: 700, color: "#9ca3af",
-            }}>
+          <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
               {username}
             </div>
           </div>
@@ -307,7 +320,8 @@ export default function ChatPage() {
             flex: 1,
             overflowY: "auto",
             padding: "16px 18px",
-            display: "flex", flexDirection: "column",
+            display: "flex",
+            flexDirection: "column",
           }}>
             <div style={{
               textAlign: "center",
@@ -323,15 +337,19 @@ export default function ChatPage() {
               Сьогодні
             </div>
 
-            {messages.map(msg => <Bubble key={msg.id} msg={msg} username={username} />)}
+            {messages.map(msg => (
+              <Bubble
+                key={msg.id}
+                msg={msg}
+                username={username}
+              />
+            ))}
+
             <div ref={bottomRef} />
           </div>
 
-          {/* Input row */}
-          <div style={{
-            padding: "14px 16px",
-            display: "flex", alignItems: "center", gap: 10,
-          }}>
+          {/* Input */}
+          <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               flex: 1,
               display: "flex", alignItems: "center",
@@ -355,37 +373,12 @@ export default function ChatPage() {
                   padding: "13px 0",
                 }}
               />
-              <button style={{
-                border: "none", background: "transparent",
-                cursor: "pointer", fontSize: 17, padding: "0 0 0 8px",
-                color: "#9ca3af",
-              }}>😊</button>
+              <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af" }}>
+                😊
+              </button>
             </div>
 
-            <button
-              onClick={send}
-              onMouseDown={() => setBtnActive(true)}
-              onMouseUp={() => setBtnActive(false)}
-              onMouseLeave={() => setBtnActive(false)}
-              style={{
-                width: 46, height: 46,
-                borderRadius: "50%",
-                border: "none",
-                background: "#868e99",
-                cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                flexShrink: 0,
-                boxShadow: btnActive
-                  ? `inset 3px 3px 6px #6e7580, inset -3px -3px 6px #9ea8b3`
-                  : neu(false, 4, 8),
-                transform: btnActive ? "scale(0.95)" : "scale(1)",
-                transition: "all 0.15s",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"/>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-              </svg>
+            <button onClick={send}>
             </button>
           </div>
 
