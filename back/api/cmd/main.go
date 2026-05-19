@@ -32,7 +32,7 @@ func main (){
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
-			AllowedOrigins: []string{"http://localhost:5173"}, // порт vite
+			AllowedOrigins: []string{"http://localhost:*"}, // порт vite
     		AllowedMethods: []string{"GET", "POST"},
    			AllowedHeaders: []string{"Content-Type"},
 		},

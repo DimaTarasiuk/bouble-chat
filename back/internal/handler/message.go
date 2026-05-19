@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 
-	"chat.com/internal/domain"
 	"chat.com/internal/service"
 	"chat.com/pkg/ws"
 )
@@ -31,8 +30,8 @@ func (h *MessageHandler)GetAll(w http.ResponseWriter, r *http.Request){
 }
 
 type createMessageRequest struct{
-	From domain.Sender `json:"from"`
-	Text string 		`json:"text"`
+	From string		`json:"from"`
+	Text string 	`json:"text"`
 }
 
 func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +49,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	// if req.From == "" {
+	// 	http.Error(w, "from is required", http.StatusBadRequest)
+	// 	return
+	// }
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

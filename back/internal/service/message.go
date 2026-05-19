@@ -9,7 +9,7 @@ import (
 
 type Service interface{
 	GetAll(ctx context.Context) ([]domain.Message, error)
-	Create(ctx context.Context, from domain.Sender, text string)(domain.Message, error)
+	Create(ctx context.Context, from string, text string)(domain.Message, error)
 }
 
 type MessageService struct{
@@ -24,6 +24,6 @@ func (s *MessageService) GetAll(ctx context.Context) ([]domain.Message, error) {
     return s.repo.GetAll(ctx)
 }
 
-func (s *MessageService) Create(ctx context.Context, from domain.Sender, text string)(domain.Message, error){
+func (s *MessageService) Create(ctx context.Context, from string, text string)(domain.Message, error){
 	return s.repo.Create(ctx, from, text)
 }
