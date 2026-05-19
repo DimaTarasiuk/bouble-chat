@@ -25,8 +25,10 @@ function Avatar({ initials, color }) {
   );
 }
 
-function Bubble({ msg }) {
-  const isMe = msg.from === "me";
+function Bubble({ msg, username }) {
+  const isMe = msg.from === username;
+  const initials = msg.from.slice(0, 2).toUpperCase();
+
   return (
     <div style={{
       display: "flex",
@@ -36,15 +38,18 @@ function Bubble({ msg }) {
       marginBottom: 16,
       animation: "fadeUp 0.25s ease both",
     }}>
-      {!isMe && <Avatar initials="SB" color="#c084a0" />}
+      {!isMe && <Avatar initials={initials} color="#c084a0" />}
 
       <div style={{ maxWidth: "68%", display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+        {!isMe && (
+          <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, marginBottom: 3, paddingLeft: 4 }}>
+            {msg.from}
+          </span>
+        )}
         <div style={{
           padding: "11px 16px",
           borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: isMe
-            ? "#ffffff"
-            : "#f5e8ee",
+          background: isMe ? "#ffffff" : "#f5e8ee",
           boxShadow: isMe
             ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
             : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
@@ -64,59 +69,174 @@ function Bubble({ msg }) {
         </span>
       </div>
 
-      {isMe && <Avatar initials="ME" color="#6b8fb5" />}
+      {isMe && <Avatar initials={initials} color="#6b8fb5" />}
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin }) {
+  const [name, setName] = useState("");
+  const [btnActive, setBtnActive] = useState(false);
+
+  const handleSubmit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onLogin(trimmed);
+  };
+
+  const onKey = (e) => {
+    if (e.key === "Enter") handleSubmit();
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: NEU_BG,
+      fontFamily: "'Nunito', sans-serif",
+    }}>
+      <div style={{
+        width: 320,
+        background: NEU_BG,
+        borderRadius: 28,
+        boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
+        padding: "40px 32px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 24,
+      }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: "50%",
+          background: NEU_BG,
+          boxShadow: neu(false, 6, 12),
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 28,
+        }}>
+          👤
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#4b5563" }}>Вітаємо!</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 4 }}>
+            Введіть ваше ім'я щоб почати чат
+          </div>
+        </div>
+
+        <div style={{
+          width: "100%",
+          display: "flex", alignItems: "center",
+          background: NEU_BG,
+          borderRadius: 50,
+          boxShadow: neu(true, 4, 8),
+          padding: "0 20px",
+        }}>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Ваше ім'я..."
+            autoFocus
+            style={{
+              flex: 1,
+              border: "none", outline: "none",
+              background: "transparent",
+              fontFamily: "'Nunito', sans-serif",
+              fontSize: 14, fontWeight: 600,
+              color: "#4b5563",
+              padding: "14px 0",
+            }}
+          />
+        </div>
+
+        <button
+          onClick={handleSubmit}
+          onMouseDown={() => setBtnActive(true)}
+          onMouseUp={() => setBtnActive(false)}
+          onMouseLeave={() => setBtnActive(false)}
+          style={{
+            width: "100%",
+            padding: "13px 0",
+            borderRadius: 50,
+            border: "none",
+            background: NEU_BG,
+            cursor: "pointer",
+            fontFamily: "'Nunito', sans-serif",
+            fontSize: 14, fontWeight: 800,
+            color: "#6b8fb5",
+            boxShadow: btnActive
+              ? neu(true, 4, 8)
+              : neu(false, 4, 8),
+            transform: btnActive ? "scale(0.98)" : "scale(1)",
+            transition: "all 0.15s",
+          }}
+        >
+          Увійти в чат →
+        </button>
+      </div>
     </div>
   );
 }
 
 export default function ChatPage() {
+  const [username, setUsername] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [focused, setFocused] = useState(false);
   const [btnActive, setBtnActive] = useState(false);
   const bottomRef = useRef(null);
+  const messagesRef = useRef(null);
+  const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
+
+ useEffect(() => {
+  if (messagesRef.current) {
+    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+  }
+}, [messages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-  fetch("http://localhost:7979/api/messages")
-    .then(res => res.json())
-    .then(data => setMessages(data))
+    fetch("http://localhost:7979/api/messages")
+      .then(res => res.json())
+      .then(data => setMessages(data));
   }, []);
 
+  
   useEffect(() => {
-  const ws = new WebSocket("ws://localhost:7979/ws");
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    setMessages(prev => [...prev, msg]);
-  };
-  return () => ws.close();
-}, []);
+    if (!username) return;
 
-  const now = () => {
-    const d = new Date();
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-  };
+    const ws = new WebSocket("ws://localhost:7979/ws");
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      setMessages(prev => [...prev, msg]);
+
+      if (msg.from !== username) {
+        notificationSound.current.currentTime = 0;
+        notificationSound.current.play().catch(err => {
+          console.log("Автоплей заблоковано браузером або помилка файлу:", err);
+        });
+      }
+    };
+
+    return () => ws.close();
+  }, [username]);
 
   const send = () => {
-  const text = input.trim();
-  if (!text) return;
-  
-  fetch("http://localhost:7979/api/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from: "me", text })
-  })
-    .then(res => res.json())
-  
-  setInput("");
-};
+    const text = input.trim();
+    if (!text) return;
+
+    fetch("http://localhost:7979/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: username, text })
+    }).then(res => res.json());
+
+    setInput("");
+  };
 
   const onKey = (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
+
+  if (!username) {
+    return <LoginScreen onLogin={setUsername} />;
+  }
 
   return (
     <>
@@ -146,13 +266,11 @@ export default function ChatPage() {
           overflow: "hidden",
         }}>
 
-          {/* ── Header ── */}
+          {/* Header */}
           <div style={{
             padding: "18px 20px",
             display: "flex", alignItems: "center", gap: 12,
-            borderBottom: "none",
           }}>
-            {/* Avatar with online dot */}
             <div style={{ position: "relative" }}>
               <div style={{
                 width: 44, height: 44, borderRadius: "50%",
@@ -170,29 +288,27 @@ export default function ChatPage() {
             </div>
 
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>share<span style={{ color: "#868e99" }}>bite</span> Support</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
+                <span style={{ color: "#868e99" }}>Bouble</span> Chat
+              </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
             </div>
 
-            {/* Menu dots */}
-            <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
-              {[0,1,2].map(i => (
-                <div key={i} style={{
-                  width: 5, height: 5, borderRadius: "50%",
-                  background: SHADOW_D,
-                }}/>
-              ))}
+            <div style={{
+              marginLeft: "auto",
+              fontSize: 12, fontWeight: 700, color: "#9ca3af",
+            }}>
+              {username}
             </div>
           </div>
 
-          {/* ── Messages ── */}
+          {/* Messages */}
           <div style={{
             flex: 1,
             overflowY: "auto",
             padding: "16px 18px",
             display: "flex", flexDirection: "column",
           }}>
-            {/* Date badge */}
             <div style={{
               textAlign: "center",
               fontSize: 11, fontWeight: 700, color: "#9ca3af",
@@ -207,11 +323,11 @@ export default function ChatPage() {
               Сьогодні
             </div>
 
-            {messages.map(msg => <Bubble key={msg.id} msg={msg} />)}
+            {messages.map(msg => <Bubble key={msg.id} msg={msg} username={username} />)}
             <div ref={bottomRef} />
           </div>
 
-          {/* ── Input row ── */}
+          {/* Input row */}
           <div style={{
             padding: "14px 16px",
             display: "flex", alignItems: "center", gap: 10,
@@ -228,8 +344,6 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
                 placeholder="Написати повідомлення..."
                 style={{
                   flex: 1,
@@ -241,7 +355,6 @@ export default function ChatPage() {
                   padding: "13px 0",
                 }}
               />
-              {/* Emoji btn */}
               <button style={{
                 border: "none", background: "transparent",
                 cursor: "pointer", fontSize: 17, padding: "0 0 0 8px",
@@ -249,7 +362,6 @@ export default function ChatPage() {
               }}>😊</button>
             </div>
 
-            {/* Send button */}
             <button
               onClick={send}
               onMouseDown={() => setBtnActive(true)}
