@@ -16,7 +16,7 @@ type MessageRepository struct{
 
 type MessageRepo interface{
 	GetAll(ctx context.Context)([]domain.Message, error)
-	Create(ctx context.Context, from domain.Sender, text string)(domain.Message, error)
+	Create(ctx context.Context, from string, text string)(domain.Message, error)
 }
 
 func NewMessageRepository() *MessageRepository{
@@ -42,7 +42,7 @@ func NewMessageRepository() *MessageRepository{
 func (r *MessageRepository) GetAll(ctx context.Context)([]domain.Message, error){
 	var messages []domain.Message
 
-	sql := "SELECT id, from_user, message_content, created_at FROM messages limit 1000"
+	sql := "SELECT id, username, message_content, created_at FROM messages LIMIT 1000"
 	
 	rows, err := r.db.Query(ctx, sql)
 	if err != nil {
@@ -62,10 +62,10 @@ func (r *MessageRepository) GetAll(ctx context.Context)([]domain.Message, error)
 	return messages, nil
 }
 
-func (r *MessageRepository) Create(ctx context.Context, from domain.Sender, text string)(domain.Message, error){
+func (r *MessageRepository) Create(ctx context.Context, from string, text string)(domain.Message, error){
 	var m domain.Message
 
-	createQuery := "insert into messages (from_user, message_content) values($1, $2) RETURNING id, from_user, message_content, created_at"
+	createQuery := "INSERT INTO messages (username, message_content) VALUES($1, $2) RETURNING id, username, message_content, created_at"
 	row := r.db.QueryRow(ctx, createQuery, from, text)
 
 	err := row.Scan(&m.ID, &m.From, &m.Text, &m.CreatedAt)

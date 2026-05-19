@@ -1,0 +1,8 @@
+[build]
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "./server"
+healthcheckPath = "/api/messages"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
