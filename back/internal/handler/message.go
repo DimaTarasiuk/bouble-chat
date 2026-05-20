@@ -37,29 +37,33 @@ type createMessageRequest struct{
 func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	
 	var req createMessageRequest
-
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("JSON decode error: %v", err)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	
+
+	log.Printf("Received message from %s: %s", req.From, req.Text)
+
 	message, err := h.svc.Create(r.Context(), req.From, req.Text)
 	if err != nil {
+		log.Printf("Service error: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// if req.From == "" {
-	// 	http.Error(w, "from is required", http.StatusBadRequest)
-	// 	return
-	// }
+	log.Printf("Message created with id: %v", message.ID) // якщо є ID
+
+	// Broadcast
+	data, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Marshal error: %v", err)
+	} else {
+		log.Printf("Broadcasting message: %s", string(data))
+		h.hub.Broadcast(data)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(message)
-	
-
-	data, _ := json.Marshal(message)
-	h.hub.Broadcast(data)
 }

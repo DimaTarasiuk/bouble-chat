@@ -161,9 +161,7 @@ function LoginScreen({ onLogin }) {
             fontFamily: "'Nunito', sans-serif",
             fontSize: 14, fontWeight: 800,
             color: "#6b8fb5",
-            boxShadow: btnActive
-              ? neu(true, 4, 8)
-              : neu(false, 4, 8),
+            boxShadow: btnActive ? neu(true, 4, 8) : neu(false, 4, 8),
             transform: btnActive ? "scale(0.98)" : "scale(1)",
             transition: "all 0.15s",
           }}
@@ -180,54 +178,85 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [btnActive, setBtnActive] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef(null);
-  const messagesRef = useRef(null);
   const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
 
- useEffect(() => {
-  if (messagesRef.current) {
-    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-  }
-}, [messages]);
-
   useEffect(() => {
-    fetch("http://localhost:7979/api/messages")
-      .then(res => res.json())
-      .then(data => setMessages(data));
-  }, []);
+    if (!loaded) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loaded]);
 
-  
   useEffect(() => {
     if (!username) return;
+
+    fetch("http://localhost:7979/api/messages")
+      .then(res => res.json())
+      .then(data => {
+        setMessages(data);
+        setLoaded(true);
+      });
 
     const ws = new WebSocket("ws://localhost:7979/ws");
 
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      setMessages(prev => [...prev, msg]);
-
-      if (msg.from !== username) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch(err => {
-          console.log("Автоплей заблоковано браузером або помилка файлу:", err);
+      try {
+        const msg = JSON.parse(e.data);
+        setMessages(prev => {
+          // замінюємо тимчасове повідомлення на реальне
+          const tempIndex = prev.findIndex(m =>
+            typeof m.id === "string" && m.id.startsWith("temp-") && m.from === msg.from
+          );
+          if (tempIndex !== -1) {
+            const updated = [...prev];
+            updated[tempIndex] = msg;
+            return updated;
+          }
+          // не додаємо дублікати
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
         });
+
+        if (msg.from !== username) {
+          notificationSound.current.currentTime = 0;
+          notificationSound.current.play().catch(() => {});
+        }
+      } catch (err) {
+        console.error("WS parse error:", err);
       }
     };
 
     return () => ws.close();
   }, [username]);
 
-  const send = () => {
+  const send = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || !username) return;
 
-    fetch("http://localhost:7979/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: username, text })
-    }).then(res => res.json());
+    const tempId = "temp-" + Date.now();
+    const tempMessage = {
+      id: tempId,
+      from: username,
+      text,
+      time: new Date().toISOString(),
+    };
 
+    setMessages(prev => [...prev, tempMessage]);
     setInput("");
+
+    try {
+      const res = await fetch("http://localhost:7979/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: username, text })
+      });
+      const savedMsg = await res.json();
+      // замінюємо temp на збережене повідомлення з реальним id
+      setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
+    } catch (err) {
+      console.error("Помилка відправки:", err);
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
   };
 
   const onKey = (e) => {
@@ -267,10 +296,7 @@ export default function ChatPage() {
         }}>
 
           {/* Header */}
-          <div style={{
-            padding: "18px 20px",
-            display: "flex", alignItems: "center", gap: 12,
-          }}>
+          <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ position: "relative" }}>
               <div style={{
                 width: 44, height: 44, borderRadius: "50%",
@@ -286,26 +312,20 @@ export default function ChatPage() {
                 boxShadow: `0 0 0 2px ${NEU_BG}`,
               }}/>
             </div>
-
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
                 <span style={{ color: "#868e99" }}>Bouble</span> Chat
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
             </div>
-
-            <div style={{
-              marginLeft: "auto",
-              fontSize: 12, fontWeight: 700, color: "#9ca3af",
-            }}>
+            <div style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
               {username}
             </div>
           </div>
 
           {/* Messages */}
           <div style={{
-            flex: 1,
-            overflowY: "auto",
+            flex: 1, overflowY: "auto",
             padding: "16px 18px",
             display: "flex", flexDirection: "column",
           }}>
@@ -313,8 +333,6 @@ export default function ChatPage() {
               textAlign: "center",
               fontSize: 11, fontWeight: 700, color: "#9ca3af",
               marginBottom: 18,
-              background: NEU_BG,
-              display: "inline-block",
               alignSelf: "center",
               padding: "4px 14px",
               borderRadius: 50,
@@ -327,18 +345,12 @@ export default function ChatPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input row */}
-          <div style={{
-            padding: "14px 16px",
-            display: "flex", alignItems: "center", gap: 10,
-          }}>
+          {/* Input */}
+          <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
-              flex: 1,
-              display: "flex", alignItems: "center",
-              background: NEU_BG,
-              borderRadius: 50,
-              boxShadow: neu(true, 4, 8),
-              padding: "0 16px",
+              flex: 1, display: "flex", alignItems: "center",
+              background: NEU_BG, borderRadius: 50,
+              boxShadow: neu(true, 4, 8), padding: "0 16px",
             }}>
               <input
                 value={input}
@@ -346,32 +358,28 @@ export default function ChatPage() {
                 onKeyDown={onKey}
                 placeholder="Написати повідомлення..."
                 style={{
-                  flex: 1,
-                  border: "none", outline: "none",
+                  flex: 1, border: "none", outline: "none",
                   background: "transparent",
                   fontFamily: "'Nunito', sans-serif",
                   fontSize: 13, fontWeight: 600,
-                  color: "#4b5563",
-                  padding: "13px 0",
+                  color: "#4b5563", padding: "13px 0",
                 }}
               />
               <button style={{
                 border: "none", background: "transparent",
-                cursor: "pointer", fontSize: 17, padding: "0 0 0 8px",
-                color: "#9ca3af",
+                cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af",
               }}>😊</button>
             </div>
 
+            {/* кнопка відправки — повернули стилі і іконку */}
             <button
               onClick={send}
               onMouseDown={() => setBtnActive(true)}
               onMouseUp={() => setBtnActive(false)}
               onMouseLeave={() => setBtnActive(false)}
               style={{
-                width: 46, height: 46,
-                borderRadius: "50%",
-                border: "none",
-                background: "#868e99",
+                width: 46, height: 46, borderRadius: "50%",
+                border: "none", background: "#868e99",
                 cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 flexShrink: 0,
