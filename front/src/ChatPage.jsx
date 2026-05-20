@@ -178,18 +178,15 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [btnActive, setBtnActive] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef(null);
   const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
-  const [loaded, setLoaded] = useState(false);
 
-  // Скрол
   useEffect(() => {
-    if (loaded && messages.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (!loaded) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loaded]);
 
-  // Fetch + WebSocket
   useEffect(() => {
     if (!username) return;
 
@@ -205,30 +202,27 @@ export default function ChatPage() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-
         setMessages(prev => {
-          // Якщо є тимчасове повідомлення від цього користувача — замінюємо його
+          // замінюємо тимчасове повідомлення на реальне
           const tempIndex = prev.findIndex(m =>
-            typeof m.id === 'string' && m.id.startsWith('temp-') && m.from === msg.from
+            typeof m.id === "string" && m.id.startsWith("temp-") && m.from === msg.from
           );
-
           if (tempIndex !== -1) {
-            const newMessages = [...prev];
-            newMessages[tempIndex] = msg;
-            return newMessages;
+            const updated = [...prev];
+            updated[tempIndex] = msg;
+            return updated;
           }
-
-          // Якщо звичайне повідомлення
+          // не додаємо дублікати
           if (prev.some(m => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
 
         if (msg.from !== username) {
           notificationSound.current.currentTime = 0;
-          notificationSound.current.play().catch(() => { });
+          notificationSound.current.play().catch(() => {});
         }
       } catch (err) {
-        console.error("JSON parse error:", err);
+        console.error("WS parse error:", err);
       }
     };
 
@@ -240,11 +234,10 @@ export default function ChatPage() {
     if (!text || !username) return;
 
     const tempId = "temp-" + Date.now();
-
     const tempMessage = {
       id: tempId,
       from: username,
-      text: text,
+      text,
       time: new Date().toISOString(),
     };
 
@@ -257,23 +250,17 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from: username, text })
       });
-
       const savedMsg = await res.json();
-
-      setMessages(prev =>
-        prev.map(m => m.id === tempId ? savedMsg : m)
-      );
+      // замінюємо temp на збережене повідомлення з реальним id
+      setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
     } catch (err) {
-      console.error("Не вдалося відправити", err);
+      console.error("Помилка відправки:", err);
       setMessages(prev => prev.filter(m => m.id !== tempId));
     }
   };
 
   const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
   if (!username) {
@@ -310,6 +297,27 @@ export default function ChatPage() {
 
           {/* Header */}
           <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ position: "relative" }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: "50%",
+                background: NEU_BG,
+                boxShadow: neu(false, 4, 8),
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, fontWeight: 800, color: "#c084a0",
+              }}>SB</div>
+              <div style={{
+                position: "absolute", bottom: 1, right: 1,
+                width: 10, height: 10, borderRadius: "50%",
+                background: "#86efac",
+                boxShadow: `0 0 0 2px ${NEU_BG}`,
+              }}/>
+            </div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
+                <span style={{ color: "#868e99" }}>Bouble</span> Chat
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
+            </div>
             <div style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
               {username}
             </div>
@@ -317,18 +325,14 @@ export default function ChatPage() {
 
           {/* Messages */}
           <div style={{
-            flex: 1,
-            overflowY: "auto",
+            flex: 1, overflowY: "auto",
             padding: "16px 18px",
-            display: "flex",
-            flexDirection: "column",
+            display: "flex", flexDirection: "column",
           }}>
             <div style={{
               textAlign: "center",
               fontSize: 11, fontWeight: 700, color: "#9ca3af",
               marginBottom: 18,
-              background: NEU_BG,
-              display: "inline-block",
               alignSelf: "center",
               padding: "4px 14px",
               borderRadius: 50,
@@ -337,26 +341,16 @@ export default function ChatPage() {
               Сьогодні
             </div>
 
-            {messages.map(msg => (
-              <Bubble
-                key={msg.id}
-                msg={msg}
-                username={username}
-              />
-            ))}
-
+            {messages.map(msg => <Bubble key={msg.id} msg={msg} username={username} />)}
             <div ref={bottomRef} />
           </div>
 
           {/* Input */}
           <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
-              flex: 1,
-              display: "flex", alignItems: "center",
-              background: NEU_BG,
-              borderRadius: 50,
-              boxShadow: neu(true, 4, 8),
-              padding: "0 16px",
+              flex: 1, display: "flex", alignItems: "center",
+              background: NEU_BG, borderRadius: 50,
+              boxShadow: neu(true, 4, 8), padding: "0 16px",
             }}>
               <input
                 value={input}
@@ -364,21 +358,42 @@ export default function ChatPage() {
                 onKeyDown={onKey}
                 placeholder="Написати повідомлення..."
                 style={{
-                  flex: 1,
-                  border: "none", outline: "none",
+                  flex: 1, border: "none", outline: "none",
                   background: "transparent",
                   fontFamily: "'Nunito', sans-serif",
                   fontSize: 13, fontWeight: 600,
-                  color: "#4b5563",
-                  padding: "13px 0",
+                  color: "#4b5563", padding: "13px 0",
                 }}
               />
-              <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af" }}>
-                😊
-              </button>
+              <button style={{
+                border: "none", background: "transparent",
+                cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af",
+              }}>😊</button>
             </div>
 
-            <button onClick={send}>
+            {/* кнопка відправки — повернули стилі і іконку */}
+            <button
+              onClick={send}
+              onMouseDown={() => setBtnActive(true)}
+              onMouseUp={() => setBtnActive(false)}
+              onMouseLeave={() => setBtnActive(false)}
+              style={{
+                width: 46, height: 46, borderRadius: "50%",
+                border: "none", background: "#868e99",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+                boxShadow: btnActive
+                  ? `inset 3px 3px 6px #6e7580, inset -3px -3px 6px #9ea8b3`
+                  : neu(false, 4, 8),
+                transform: btnActive ? "scale(0.95)" : "scale(1)",
+                transition: "all 0.15s",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
             </button>
           </div>
 
