@@ -1,6 +1,9 @@
 package jwt
 
 import (
+	"go/token"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -11,8 +14,15 @@ type Claims struct{
 }
 
 func generateToken(userID int64, secret string) (string, error){
-	//todo create claims with ID and exp
-	//todo create token with claims
-	//todo signature
 
+	claims := Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 *time.Hour)),
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	return token.SignedString([]byte(secret))
 }
