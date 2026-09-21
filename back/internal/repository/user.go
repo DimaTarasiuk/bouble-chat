@@ -24,6 +24,7 @@ type UserRepository struct {
 type UserRepo interface {
 	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
+	Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error)
 }
 
 func NewUserRepository() *UserRepository {
@@ -75,4 +76,28 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (do
 		return domain.User{}, err
 	}
 	return u, nil
+}
+
+func (r *UserRepository) Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error) {
+	users := make([]domain.User, 0)
+	sql := `SELECT id, username, created_at
+			FROM users
+			WHERE username ILIKE $1
+			  AND id <> $2
+			ORDER BY username
+			LIMIT $3`
+	rows, err := r.db.Query(ctx, sql, query+"%", excludeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
 }

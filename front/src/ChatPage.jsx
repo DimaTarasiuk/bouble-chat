@@ -301,12 +301,157 @@ function AuthScreen({ onAuth }) {
   );
 }
 
+function ConversationsScreen({ username, onOpen, onLogout }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [error, setError] = useState("");
+
+  const loadChats = () => {
+    fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
+      .then(async res => {
+        if (res.status === 401) {
+          clearSession();
+          onLogout();
+          return [];
+        }
+        return res.json();
+      })
+      .then(data => setChats(Array.isArray(data) ? data : []))
+      .catch(() => setChats([]));
+  };
+
+  useEffect(() => {
+    loadChats();
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      fetch(`${API_URL}/api/users?q=${encodeURIComponent(q)}`, { headers: authHeaders() })
+        .then(res => res.json())
+        .then(data => setResults(Array.isArray(data) ? data : []))
+        .catch(() => setResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const openUser = async (peer) => {
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/conversations`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ username: peer }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error === "cannot chat with yourself"
+          ? "Не можна писати самому собі"
+          : "Не вдалося відкрити чат");
+        return;
+      }
+      onOpen({ id: data.id, peer: data.peer });
+    } catch {
+      setError("Не вдалося відкрити чат");
+    }
+  };
+
+  const showSearch = query.trim().length > 0;
+
+  return (
+    <>
+      <div style={{ padding: "16px 20px 8px" }}>
+        <NeuField
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Пошук за логіном..."
+        />
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center", padding: "0 20px 8px" }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px 16px" }}>
+        {showSearch ? (
+          results.length === 0 ? (
+            <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24 }}>
+              Нікого не знайдено
+            </div>
+          ) : results.map(u => (
+            <button
+              key={u.id}
+              onClick={() => openUser(u.username)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px",
+                marginBottom: 10,
+                border: "none",
+                borderRadius: 18,
+                background: NEU_BG,
+                boxShadow: neu(false, 3, 6),
+                cursor: "pointer",
+                fontFamily: "'Nunito', sans-serif",
+                textAlign: "left",
+              }}
+            >
+              <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{u.username}</div>
+            </button>
+          ))
+        ) : chats.length === 0 ? (
+          <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24, padding: "0 12px" }}>
+            Немає діалогів. Знайдіть користувача за логіном
+          </div>
+        ) : chats.map(c => (
+          <button
+            key={c.id}
+            onClick={() => onOpen({ id: c.id, peer: c.peer })}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 12px",
+              marginBottom: 10,
+              border: "none",
+              borderRadius: 18,
+              background: NEU_BG,
+              boxShadow: neu(false, 3, 6),
+              cursor: "pointer",
+              fontFamily: "'Nunito', sans-serif",
+              textAlign: "left",
+            }}
+          >
+            <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af" }}>Приватний чат</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function ChatPage() {
   const [username, setUsername] = useState(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     const saved = localStorage.getItem(USER_KEY);
     return token && saved ? saved : null;
   });
+  const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [btnActive, setBtnActive] = useState(false);
@@ -338,9 +483,9 @@ export default function ChatPage() {
   }, [loaded]);
 
   useEffect(() => {
-    if (!username) return;
+    if (!username || !activeChat) return;
 
-    fetch(`${API_URL}/api/messages`, { headers: authHeaders() })
+    fetch(`${API_URL}/api/conversations/${activeChat.id}/messages`, { headers: authHeaders() })
       .then(async res => {
         if (res.status === 401) {
           clearSession();
@@ -357,7 +502,9 @@ export default function ChatPage() {
       });
 
     const token = localStorage.getItem(TOKEN_KEY);
-    const ws = new WebSocket(`${API_URL.replace("http", "ws")}/ws?token=${encodeURIComponent(token || "")}`);
+    const ws = new WebSocket(
+      `${API_URL.replace("http", "ws")}/ws?token=${encodeURIComponent(token || "")}&conversation_id=${activeChat.id}`
+    );
 
     ws.onmessage = (e) => {
       try {
@@ -387,11 +534,11 @@ export default function ChatPage() {
     };
 
     return () => ws.close();
-  }, [username]);
+  }, [username, activeChat]);
 
   const send = async () => {
     const text = input.trim();
-    if (!text || !username) return;
+    if (!text || !username || !activeChat) return;
 
     const tempId = "temp-" + Date.now();
     const tempMessage = {
@@ -405,10 +552,10 @@ export default function ChatPage() {
     setInput("");
 
     try {
-      const res = await fetch(`${API_URL}/api/messages`, {
+      const res = await fetch(`${API_URL}/api/conversations/${activeChat.id}/messages`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ from: username, text })
+        body: JSON.stringify({ text })
       });
       if (res.status === 401) {
         clearSession();
@@ -428,12 +575,30 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  const openChat = (chat) => {
+    skipSmooth.current = true;
+    historyIds.current = new Set();
+    setMessages([]);
+    setLoaded(false);
+    setInput("");
+    setActiveChat(chat);
+  };
+
+  const closeChat = () => {
+    setActiveChat(null);
+    setMessages([]);
+    setLoaded(false);
+    skipSmooth.current = true;
+    historyIds.current = new Set();
+  };
+
   const logout = () => {
     clearSession();
     setMessages([]);
     setLoaded(false);
     skipSmooth.current = true;
     historyIds.current = new Set();
+    setActiveChat(null);
     setUsername(null);
   };
 
@@ -471,26 +636,41 @@ export default function ChatPage() {
 
           {/* Header */}
           <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ position: "relative" }}>
-              <div style={{
-                width: 44, height: 44, borderRadius: "50%",
-                background: NEU_BG,
-                boxShadow: neu(false, 4, 8),
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 14, fontWeight: 800, color: "#c084a0",
-              }}>SB</div>
-              <div style={{
-                position: "absolute", bottom: 1, right: 1,
-                width: 10, height: 10, borderRadius: "50%",
-                background: "#86efac",
-                boxShadow: `0 0 0 2px ${NEU_BG}`,
-              }}/>
-            </div>
+            {activeChat ? (
+              <button
+                onClick={closeChat}
+                style={{
+                  width: 44, height: 44, borderRadius: "50%",
+                  border: "none", background: NEU_BG,
+                  boxShadow: neu(false, 4, 8),
+                  cursor: "pointer",
+                  fontSize: 18, fontWeight: 800, color: "#6b8fb5",
+                }}
+              >←</button>
+            ) : (
+              <div style={{ position: "relative" }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: "50%",
+                  background: NEU_BG,
+                  boxShadow: neu(false, 4, 8),
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 14, fontWeight: 800, color: "#c084a0",
+                }}>SB</div>
+                <div style={{
+                  position: "absolute", bottom: 1, right: 1,
+                  width: 10, height: 10, borderRadius: "50%",
+                  background: "#86efac",
+                  boxShadow: `0 0 0 2px ${NEU_BG}`,
+                }}/>
+              </div>
+            )}
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-                <span style={{ color: "#868e99" }}>Bouble</span> Chat
+                {activeChat ? activeChat.peer : <><span style={{ color: "#868e99" }}>Bouble</span> Chat</>}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: activeChat ? "#86efac" : "#9ca3af" }}>
+                {activeChat ? "● Online" : "Приватні чати"}
+              </div>
             </div>
             <div style={{ marginLeft: "auto", textAlign: "right" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
@@ -515,6 +695,10 @@ export default function ChatPage() {
             </div>
           </div>
 
+          {!activeChat ? (
+            <ConversationsScreen username={username} onOpen={openChat} onLogout={logout} />
+          ) : (
+            <>
           {/* Messages */}
           <div ref={listRef} style={{
             flex: 1, overflowY: "auto",
@@ -595,6 +779,8 @@ export default function ChatPage() {
               </svg>
             </button>
           </div>
+            </>
+          )}
 
         </div>
       </div>

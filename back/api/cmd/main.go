@@ -30,10 +30,11 @@ func main (){
 		log.Fatal("JWT_SECRET is required")
 	}
 
-	repo := repository.NewMessageRepository()
-	svc := service.NewMessageService(repo)
+	msgRepo := repository.NewMessageRepository()
 	userRepo := repository.NewUserRepository()
+	convRepo := repository.NewConversationRepository()
 	authSvc := service.NewAuthService(userRepo, secret)
+	chatSvc := service.NewConversationService(userRepo, convRepo, msgRepo)
 	hub := ws.NewHub()
 	go hub.Run()
 
@@ -44,17 +45,20 @@ func main (){
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}))
 
-	h := handler.New(svc, hub)
 	authH := handler.NewAuth(authSvc, secret)
+	chatH := handler.NewConversation(chatSvc, hub)
 
 	r.Post("/api/register", authH.Register)
 	r.Post("/api/login", authH.Login)
-	r.Get("/ws", authH.WSAuth(hub.ServeWS))
+	r.Get("/ws", authH.WSAuth(chatH.ServeWS))
 
 	r.Group(func(r chi.Router) {
 		r.Use(authH.Middleware)
-		r.Get("/api/messages", h.GetAll)
-		r.Post("/api/messages", h.Create)
+		r.Get("/api/users", chatH.SearchUsers)
+		r.Get("/api/conversations", chatH.List)
+		r.Post("/api/conversations", chatH.Create)
+		r.Get("/api/conversations/{id}/messages", chatH.GetMessages)
+		r.Post("/api/conversations/{id}/messages", chatH.SendMessage)
 	})
 
 	http.ListenAndServe(":"+os.Getenv("APP_PORT"), r)

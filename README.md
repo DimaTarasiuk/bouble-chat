@@ -61,10 +61,12 @@ The token is stored in `localStorage` and sent on later requests. **Вийти**
 
 Protected endpoints:
 
-- `GET /api/messages` and `POST /api/messages` — header `Authorization: Bearer <token>`
-- `GET /ws` — query `?token=<token>` (browser WebSocket cannot set headers)
+- `GET /api/users?q=` — search users by login
+- `GET /api/conversations` and `POST /api/conversations` — private chats
+- `GET /api/conversations/{id}/messages` and `POST /api/conversations/{id}/messages`
+- `GET /ws?token=&conversation_id=` — events for that chat only
 
-The message author is taken from the JWT, not from the request body.
+There is **no global room**. After login you search a user by login and open a 1:1 chat. The message author is taken from the JWT.
 
 ## Getting Started
 
@@ -119,9 +121,12 @@ Open [http://localhost:5173](http://localhost:5173)
 |--------|----------|------|-------------|
 | POST | `/api/register` | no | Register a user |
 | POST | `/api/login` | no | Log in |
-| GET | `/api/messages` | Bearer | Get all messages |
-| POST | `/api/messages` | Bearer | Send a message |
-| GET | `/ws` | `?token=` | WebSocket connection |
+| GET | `/api/users?q=` | Bearer | Search users by login |
+| GET | `/api/conversations` | Bearer | List my private chats |
+| POST | `/api/conversations` | Bearer | Find or create a 1:1 chat |
+| GET | `/api/conversations/{id}/messages` | Bearer | Messages in a chat |
+| POST | `/api/conversations/{id}/messages` | Bearer | Send a private message |
+| GET | `/ws` | `?token=&conversation_id=` | WebSocket for that chat |
 
 ### POST /api/register
 
@@ -173,9 +178,34 @@ Errors:
 | 400 | `login and password required` |
 | 401 | `invalid credentials` |
 
-### POST /api/messages
+### GET /api/users?q=
+
+Requires `Authorization: Bearer <token>`. Returns users whose login starts with `q`, excluding yourself.
+
+### POST /api/conversations
 
 Requires `Authorization: Bearer <token>`.
+
+Request:
+```json
+{
+  "username": "ivan"
+}
+```
+
+Response `200` — existing or newly created chat:
+
+```json
+{
+  "id": 1,
+  "peer": "ivan",
+  "created_at": "2026-09-21T17:40:00+03:00"
+}
+```
+
+### POST /api/conversations/{id}/messages
+
+Requires `Authorization: Bearer <token>` and membership in that chat.
 
 Request:
 ```json
