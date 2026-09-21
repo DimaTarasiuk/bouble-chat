@@ -26,6 +26,53 @@ const neu = (inset = false, d = 5, b = 10) => {
   return `${p}${d}px ${d}px ${b}px ${SHADOW_D}, ${p}-${d}px -${d}px ${b}px ${SHADOW_L}`;
 };
 
+function haptic(ms = 12) {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {}
+}
+
+function AppStyles() {
+  useEffect(() => {
+    const onDown = (e) => {
+      const el = e.target.closest?.(".neu-press, .neu-press-send, .neu-press-soft");
+      if (!el) return;
+      haptic(el.classList.contains("neu-press-send") ? 20 : 12);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, []);
+
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: ${NEU_BG}; }
+      ::-webkit-scrollbar { width: 0; }
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .neu-press {
+        transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .neu-press:active {
+        transform: scale(0.97);
+        box-shadow: inset 3px 3px 6px ${SHADOW_D}, inset -3px -3px 6px ${SHADOW_L} !important;
+      }
+      .neu-press-send:active {
+        transform: scale(0.93);
+        box-shadow: inset 3px 3px 6px #6e7580, inset -3px -3px 6px #9ea8b3 !important;
+      }
+      .neu-press-soft:active {
+        transform: scale(0.96);
+        opacity: 0.65;
+      }
+    `}</style>
+  );
+}
+
 function Avatar({ initials, color }) {
   return (
     <div style={{
@@ -129,7 +176,6 @@ function AuthScreen({ onAuth }) {
   const [password2, setPassword2] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [btnActive, setBtnActive] = useState(false);
 
   const isRegister = mode === "register";
 
@@ -198,6 +244,7 @@ function AuthScreen({ onAuth }) {
       background: NEU_BG,
       fontFamily: "'Nunito', sans-serif",
     }}>
+      <AppStyles />
       <div style={{
         width: 320,
         background: NEU_BG,
@@ -256,11 +303,9 @@ function AuthScreen({ onAuth }) {
         )}
 
         <button
+          className="neu-press"
           onClick={handleSubmit}
           disabled={loading}
-          onMouseDown={() => setBtnActive(true)}
-          onMouseUp={() => setBtnActive(false)}
-          onMouseLeave={() => setBtnActive(false)}
           style={{
             width: "100%",
             padding: "13px 0",
@@ -271,9 +316,7 @@ function AuthScreen({ onAuth }) {
             fontFamily: "'Nunito', sans-serif",
             fontSize: 14, fontWeight: 800,
             color: "#6b8fb5",
-            boxShadow: btnActive ? neu(true, 4, 8) : neu(false, 4, 8),
-            transform: btnActive ? "scale(0.98)" : "scale(1)",
-            transition: "all 0.15s",
+            boxShadow: neu(false, 4, 8),
             opacity: loading ? 0.7 : 1,
           }}
         >
@@ -283,6 +326,7 @@ function AuthScreen({ onAuth }) {
         </button>
 
         <button
+          className="neu-press-soft"
           onClick={() => switchMode(isRegister ? "login" : "register")}
           style={{
             border: "none",
@@ -388,6 +432,7 @@ function ConversationsScreen({ username, onOpen, onLogout }) {
           ) : results.map(u => (
             <button
               key={u.id}
+              className="neu-press"
               onClick={() => openUser(u.username)}
               style={{
                 width: "100%",
@@ -416,6 +461,7 @@ function ConversationsScreen({ username, onOpen, onLogout }) {
         ) : chats.map(c => (
           <button
             key={c.id}
+            className="neu-press"
             onClick={() => onOpen({ id: c.id, peer: c.peer })}
             style={{
               width: "100%",
@@ -454,7 +500,6 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [btnActive, setBtnActive] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef(null);
   const listRef = useRef(null);
@@ -608,16 +653,7 @@ export default function ChatPage() {
 
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: ${NEU_BG}; }
-        ::-webkit-scrollbar { width: 0; }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(10px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
+      <AppStyles />
 
       <div style={{
         minHeight: "100vh",
@@ -638,6 +674,7 @@ export default function ChatPage() {
           <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
             {activeChat ? (
               <button
+                className="neu-press"
                 onClick={closeChat}
                 style={{
                   width: 44, height: 44, borderRadius: "50%",
@@ -677,6 +714,7 @@ export default function ChatPage() {
                 {username}
               </div>
               <button
+                className="neu-press-soft"
                 onClick={logout}
                 style={{
                   marginTop: 2,
@@ -748,7 +786,7 @@ export default function ChatPage() {
                   color: "#4b5563", padding: "13px 0",
                 }}
               />
-              <button style={{
+              <button className="neu-press-soft" style={{
                 border: "none", background: "transparent",
                 cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af",
               }}>😊</button>
@@ -756,21 +794,15 @@ export default function ChatPage() {
 
             {/* кнопка відправки — повернули стилі і іконку */}
             <button
+              className="neu-press neu-press-send"
               onClick={send}
-              onMouseDown={() => setBtnActive(true)}
-              onMouseUp={() => setBtnActive(false)}
-              onMouseLeave={() => setBtnActive(false)}
               style={{
                 width: 46, height: 46, borderRadius: "50%",
                 border: "none", background: "#868e99",
                 cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 flexShrink: 0,
-                boxShadow: btnActive
-                  ? `inset 3px 3px 6px #6e7580, inset -3px -3px 6px #9ea8b3`
-                  : neu(false, 4, 8),
-                transform: btnActive ? "scale(0.95)" : "scale(1)",
-                transition: "all 0.15s",
+                boxShadow: neu(false, 4, 8),
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
