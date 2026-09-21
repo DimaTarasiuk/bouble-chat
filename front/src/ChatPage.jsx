@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 
-const API_URL = "http://localhost:7979";
+const API_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:7979" : window.location.origin)
+).replace(/\/$/, "");
 const TOKEN_KEY = "chat_token";
 const USER_KEY = "chat_username";
 
@@ -29,7 +32,9 @@ const neu = (inset = false, d = 5, b = 10) => {
 function haptic(ms = 12) {
   try {
     navigator.vibrate?.(ms);
-  } catch {}
+  } catch {
+    // Vibration is optional and may be blocked by the browser.
+  }
 }
 
 function AppStyles() {
@@ -345,13 +350,13 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function ConversationsScreen({ username, onOpen, onLogout }) {
+function ConversationsScreen({ onOpen, onLogout }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [chats, setChats] = useState([]);
   const [error, setError] = useState("");
 
-  const loadChats = () => {
+  useEffect(() => {
     fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
       .then(async res => {
         if (res.status === 401) {
@@ -363,16 +368,11 @@ function ConversationsScreen({ username, onOpen, onLogout }) {
       })
       .then(data => setChats(Array.isArray(data) ? data : []))
       .catch(() => setChats([]));
-  };
-
-  useEffect(() => {
-    loadChats();
-  }, []);
+  }, [onLogout]);
 
   useEffect(() => {
     const q = query.trim();
     if (!q) {
-      setResults([]);
       return;
     }
     const t = setTimeout(() => {
@@ -504,7 +504,7 @@ export default function ChatPage() {
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
-  const historyIds = useRef(new Set());
+  const [historyIds, setHistoryIds] = useState(() => new Set());
   const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
 
   useLayoutEffect(() => {
@@ -541,7 +541,7 @@ export default function ChatPage() {
       })
       .then(data => {
         const list = Array.isArray(data) ? data : [];
-        historyIds.current = new Set(list.map(m => m.id));
+        setHistoryIds(new Set(list.map(m => m.id)));
         setMessages(list);
         setLoaded(true);
       });
@@ -622,7 +622,7 @@ export default function ChatPage() {
 
   const openChat = (chat) => {
     skipSmooth.current = true;
-    historyIds.current = new Set();
+    setHistoryIds(new Set());
     setMessages([]);
     setLoaded(false);
     setInput("");
@@ -634,7 +634,7 @@ export default function ChatPage() {
     setMessages([]);
     setLoaded(false);
     skipSmooth.current = true;
-    historyIds.current = new Set();
+    setHistoryIds(new Set());
   };
 
   const logout = () => {
@@ -642,7 +642,7 @@ export default function ChatPage() {
     setMessages([]);
     setLoaded(false);
     skipSmooth.current = true;
-    historyIds.current = new Set();
+    setHistoryIds(new Set());
     setActiveChat(null);
     setUsername(null);
   };
@@ -734,7 +734,7 @@ export default function ChatPage() {
           </div>
 
           {!activeChat ? (
-            <ConversationsScreen username={username} onOpen={openChat} onLogout={logout} />
+            <ConversationsScreen onOpen={openChat} onLogout={logout} />
           ) : (
             <>
           {/* Messages */}
@@ -760,7 +760,7 @@ export default function ChatPage() {
                 key={msg.id}
                 msg={msg}
                 username={username}
-                animate={!historyIds.current.has(msg.id)}
+                animate={!historyIds.has(msg.id)}
               />
             ))}
             <div ref={bottomRef} />

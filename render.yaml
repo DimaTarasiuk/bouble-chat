@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: bouble-chat
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./back/dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_MIGRATION_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+    buildFilter:
+      paths:
+        - back/**
+        - front/**
+        - render.yaml

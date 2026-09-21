@@ -1,10 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"chat.com/internal/handler"
 	"chat.com/internal/repository"
@@ -15,16 +17,13 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func init(){
+func init() {
 	if err := godotenv.Load(); err != nil {
 		log.Print("No .env file found")
 	}
-	log.Printf(".env file loaded \n")
 }
 
-func main (){
-
-	
+func main() {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
 		log.Fatal("JWT_SECRET is required")
@@ -39,8 +38,14 @@ func main (){
 	go hub.Run()
 
 	r := chi.NewRouter()
+	allowedOrigins := []string{"http://localhost:*"}
+	for origin := range strings.SplitSeq(os.Getenv("FRONTEND_URL"), ",") {
+		if origin = strings.TrimSpace(strings.TrimSuffix(origin, "/")); origin != "" {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"http://localhost:*"},
+		AllowedOrigins: allowedOrigins,
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}))
@@ -48,6 +53,11 @@ func main (){
 	authH := handler.NewAuth(authSvc, secret)
 	chatH := handler.NewConversation(chatSvc, hub)
 
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
 	r.Post("/api/register", authH.Register)
 	r.Post("/api/login", authH.Login)
 	r.Get("/ws", authH.WSAuth(chatH.ServeWS))
@@ -61,7 +71,47 @@ func main (){
 		r.Post("/api/conversations/{id}/messages", chatH.SendMessage)
 	})
 
-	http.ListenAndServe(":"+os.Getenv("APP_PORT"), r)
-	fmt.Printf("Server started \n")
-	
+	serveFrontend(r)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = os.Getenv("APP_PORT")
+	}
+	if port == "" {
+		port = "7979"
+	}
+
+	log.Printf("Server listening on port %s", port)
+	if err := http.ListenAndServe(":"+port, r); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func serveFrontend(r *chi.Mux) {
+	publicDir := os.Getenv("STATIC_DIR")
+	if publicDir == "" {
+		publicDir = "./public"
+	}
+
+	indexPath := filepath.Join(publicDir, "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		log.Printf("Frontend files not found in %s; API-only mode", publicDir)
+		return
+	}
+
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/") || req.URL.Path == "/ws" {
+			http.NotFound(w, req)
+			return
+		}
+
+		cleanPath := strings.TrimPrefix(path.Clean(req.URL.Path), "/")
+		filePath := filepath.Join(publicDir, filepath.FromSlash(cleanPath))
+		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+			http.ServeFile(w, req, filePath)
+			return
+		}
+
+		http.ServeFile(w, req, indexPath)
+	})
 }

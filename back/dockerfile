@@ -1,12 +1,25 @@
-FROM golang:1.25-alpine AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
+FROM node:20-alpine AS frontend-builder
+WORKDIR /src/front
+COPY front/package.json front/package-lock.json ./
+RUN npm ci
+COPY front/ ./
+RUN npm run build
+
+FROM golang:1.25-alpine AS backend-builder
+WORKDIR /src/back
+COPY back/go.mod back/go.sum ./
 RUN go mod download
-COPY . .
-RUN go build -o bin/server ./api/cmd/...
+COPY back/ ./
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/server ./api/cmd/...
+RUN CGO_ENABLED=0 GOBIN=/out go install github.com/pressly/goose/v3/cmd/goose@v3.24.1
 
 FROM alpine:latest
 WORKDIR /app
-COPY --from=builder /app/bin/server .
+RUN apk add --no-cache ca-certificates
+COPY --from=backend-builder /out/server /out/goose ./
+COPY back/db/migrations ./migrations
+COPY back/entrypoint.sh ./
+COPY --from=frontend-builder /src/front/dist ./public
+RUN chmod +x ./entrypoint.sh
 EXPOSE 7979
-CMD ["./server"]
+ENTRYPOINT ["./entrypoint.sh"]
