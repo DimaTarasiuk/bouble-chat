@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import notificationMp3 from "./static/bulk-10.mp3";
 
 const API_URL = (
   import.meta.env.VITE_API_URL ||
@@ -18,6 +19,30 @@ const authHeaders = () => {
 const clearSession = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+};
+
+const createNotificationSound = () => {
+  const audio = new Audio(notificationMp3);
+  audio.preload = "auto";
+  audio.playsInline = true;
+  audio.setAttribute("playsinline", "true");
+  audio.setAttribute("webkit-playsinline", "true");
+  return audio;
+};
+
+const playNotification = (audioRef) => {
+  const audio = audioRef.current;
+  if (!audio) return;
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    const playPromise = audio.play();
+    if (playPromise?.catch) {
+      playPromise.catch(() => {});
+    }
+  } catch {
+    // Ignore autoplay / media errors on mobile.
+  }
 };
 
 const NEU_BG = "#e0e5ec";
@@ -96,7 +121,7 @@ function Avatar({ initials, color }) {
 
 function Bubble({ msg, username, animate = false }) {
   const isMe = msg.from === username;
-  const initials = msg.from.slice(0, 2).toUpperCase();
+  const initials = (msg.from || "?").slice(0, 2).toUpperCase();
 
   return (
     <div style={{
@@ -542,7 +567,15 @@ export default function ChatPage() {
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
   const [historyIds, setHistoryIds] = useState(() => new Set());
-  const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
+  const notificationSound = useRef(null);
+
+  useEffect(() => {
+    notificationSound.current = createNotificationSound();
+    return () => {
+      notificationSound.current?.pause();
+      notificationSound.current = null;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -607,8 +640,7 @@ export default function ChatPage() {
         });
 
         if (msg.from !== username) {
-          notificationSound.current.currentTime = 0;
-          notificationSound.current.play().catch(() => {});
+          playNotification(notificationSound);
         }
       } catch (err) {
         console.error("WS parse error:", err);
