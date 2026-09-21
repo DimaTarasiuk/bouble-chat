@@ -1,4 +1,21 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+
+const API_URL = "http://localhost:7979";
+const TOKEN_KEY = "chat_token";
+const USER_KEY = "chat_username";
+
+const authHeaders = () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+const clearSession = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+};
 
 const NEU_BG = "#e0e5ec";
 const SHADOW_D = "#b8bec7";
@@ -25,7 +42,7 @@ function Avatar({ initials, color }) {
   );
 }
 
-function Bubble({ msg, username }) {
+function Bubble({ msg, username, animate = false }) {
   const isMe = msg.from === username;
   const initials = msg.from.slice(0, 2).toUpperCase();
 
@@ -36,7 +53,7 @@ function Bubble({ msg, username }) {
       alignItems: "flex-end",
       gap: 10,
       marginBottom: 16,
-      animation: "fadeUp 0.25s ease both",
+      ...(animate ? { animation: "fadeUp 0.25s ease both" } : {}),
     }}>
       {!isMe && <Avatar initials={initials} color="#c084a0" />}
 
@@ -74,14 +91,100 @@ function Bubble({ msg, username }) {
   );
 }
 
-function LoginScreen({ onLogin }) {
-  const [name, setName] = useState("");
+function NeuField({ type = "text", value, onChange, placeholder, onKey, autoFocus }) {
+  return (
+    <div style={{
+      width: "100%",
+      display: "flex", alignItems: "center",
+      background: NEU_BG,
+      borderRadius: 50,
+      boxShadow: neu(true, 4, 8),
+      padding: "0 20px",
+    }}>
+      <input
+        type={type}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKey}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        style={{
+          flex: 1,
+          border: "none", outline: "none",
+          background: "transparent",
+          fontFamily: "'Nunito', sans-serif",
+          fontSize: 14, fontWeight: 600,
+          color: "#4b5563",
+          padding: "14px 0",
+        }}
+      />
+    </div>
+  );
+}
+
+function AuthScreen({ onAuth }) {
+  const [mode, setMode] = useState("login");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const [btnActive, setBtnActive] = useState(false);
 
-  const handleSubmit = () => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onLogin(trimmed);
+  const isRegister = mode === "register";
+
+  const switchMode = (next) => {
+    setMode(next);
+    setError("");
+    setPassword2("");
+  };
+
+  const saveSession = (data) => {
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(USER_KEY, data.user.username);
+    onAuth(data.user.username);
+  };
+
+  const handleSubmit = async () => {
+    const username = login.trim();
+    if (!username || !password) {
+      setError("Заповніть логін і пароль");
+      return;
+    }
+    if (isRegister && password !== password2) {
+      setError("Паролі не співпадають");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/${isRegister ? "register" : "login"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isRegister
+          ? { username, password, password_confirm: password2 }
+          : { username, password }
+        ),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const messages = {
+          "login and password required": "Заповніть логін і пароль",
+          "passwords do not match": "Паролі не співпадають",
+          "username already taken": "Такий логін уже зайнятий",
+          "invalid credentials": "Невірний логін або пароль",
+        };
+        setError(messages[data.error] || (isRegister ? "Не вдалося зареєструватися" : "Не вдалося увійти"));
+        return;
+      }
+
+      saveSession(data);
+    } catch {
+      setError(isRegister ? "Не вдалося зареєструватися" : "Не вдалося увійти");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onKey = (e) => {
@@ -101,7 +204,7 @@ function LoginScreen({ onLogin }) {
         borderRadius: 28,
         boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
         padding: "40px 32px",
-        display: "flex", flexDirection: "column", alignItems: "center", gap: 24,
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
       }}>
         <div style={{
           width: 72, height: 72, borderRadius: "50%",
@@ -114,40 +217,47 @@ function LoginScreen({ onLogin }) {
         </div>
 
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#4b5563" }}>Вітаємо!</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#4b5563" }}>
+            {isRegister ? "Реєстрація" : "Вхід"}
+          </div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 4 }}>
-            Введіть ваше ім'я щоб почати чат
+            {isRegister ? "Створіть акаунт щоб почати чат" : "Увійдіть щоб продовжити чат"}
           </div>
         </div>
 
-        <div style={{
-          width: "100%",
-          display: "flex", alignItems: "center",
-          background: NEU_BG,
-          borderRadius: 50,
-          boxShadow: neu(true, 4, 8),
-          padding: "0 20px",
-        }}>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Ваше ім'я..."
-            autoFocus
-            style={{
-              flex: 1,
-              border: "none", outline: "none",
-              background: "transparent",
-              fontFamily: "'Nunito', sans-serif",
-              fontSize: 14, fontWeight: 600,
-              color: "#4b5563",
-              padding: "14px 0",
-            }}
+        <NeuField
+          value={login}
+          onChange={e => setLogin(e.target.value)}
+          onKey={onKey}
+          placeholder="Логін"
+          autoFocus
+        />
+        <NeuField
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          onKey={onKey}
+          placeholder="Пароль"
+        />
+        {isRegister && (
+          <NeuField
+            type="password"
+            value={password2}
+            onChange={e => setPassword2(e.target.value)}
+            onKey={onKey}
+            placeholder="Пароль ще раз"
           />
-        </div>
+        )}
+
+        {error && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center" }}>
+            {error}
+          </div>
+        )}
 
         <button
           onClick={handleSubmit}
+          disabled={loading}
           onMouseDown={() => setBtnActive(true)}
           onMouseUp={() => setBtnActive(false)}
           onMouseLeave={() => setBtnActive(false)}
@@ -157,16 +267,34 @@ function LoginScreen({ onLogin }) {
             borderRadius: 50,
             border: "none",
             background: NEU_BG,
-            cursor: "pointer",
+            cursor: loading ? "default" : "pointer",
             fontFamily: "'Nunito', sans-serif",
             fontSize: 14, fontWeight: 800,
             color: "#6b8fb5",
             boxShadow: btnActive ? neu(true, 4, 8) : neu(false, 4, 8),
             transform: btnActive ? "scale(0.98)" : "scale(1)",
             transition: "all 0.15s",
+            opacity: loading ? 0.7 : 1,
           }}
         >
-          Увійти в чат →
+          {loading
+            ? (isRegister ? "Реєстрація..." : "Вхід...")
+            : (isRegister ? "Зареєструватися →" : "Увійти →")}
+        </button>
+
+        <button
+          onClick={() => switchMode(isRegister ? "login" : "register")}
+          style={{
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            fontFamily: "'Nunito', sans-serif",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#9ca3af",
+          }}
+        >
+          {isRegister ? "Вже є акаунт? Увійти" : "Немає акаунта? Зареєструватися"}
         </button>
       </div>
     </div>
@@ -174,30 +302,62 @@ function LoginScreen({ onLogin }) {
 }
 
 export default function ChatPage() {
-  const [username, setUsername] = useState(null);
+  const [username, setUsername] = useState(() => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const saved = localStorage.getItem(USER_KEY);
+    return token && saved ? saved : null;
+  });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [btnActive, setBtnActive] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef(null);
+  const listRef = useRef(null);
+  const skipSmooth = useRef(true);
+  const historyIds = useRef(new Set());
   const notificationSound = useRef(new Audio("src/static/bulk-10.mp3"));
+
+  useLayoutEffect(() => {
+    if (!loaded) return;
+    const list = listRef.current;
+    if (!list) return;
+
+    if (skipSmooth.current) {
+      list.scrollTop = list.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loaded]);
+    const id = requestAnimationFrame(() => {
+      skipSmooth.current = false;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [loaded]);
 
   useEffect(() => {
     if (!username) return;
 
-    fetch("http://localhost:7979/api/messages")
-      .then(res => res.json())
+    fetch(`${API_URL}/api/messages`, { headers: authHeaders() })
+      .then(async res => {
+        if (res.status === 401) {
+          clearSession();
+          setUsername(null);
+          return [];
+        }
+        return res.json();
+      })
       .then(data => {
-        setMessages(data);
+        const list = Array.isArray(data) ? data : [];
+        historyIds.current = new Set(list.map(m => m.id));
+        setMessages(list);
         setLoaded(true);
       });
 
-    const ws = new WebSocket("ws://localhost:7979/ws");
+    const token = localStorage.getItem(TOKEN_KEY);
+    const ws = new WebSocket(`${API_URL.replace("http", "ws")}/ws?token=${encodeURIComponent(token || "")}`);
 
     ws.onmessage = (e) => {
       try {
@@ -245,11 +405,16 @@ export default function ChatPage() {
     setInput("");
 
     try {
-      const res = await fetch("http://localhost:7979/api/messages", {
+      const res = await fetch(`${API_URL}/api/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ from: username, text })
       });
+      if (res.status === 401) {
+        clearSession();
+        setUsername(null);
+        return;
+      }
       const savedMsg = await res.json();
       // замінюємо temp на збережене повідомлення з реальним id
       setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
@@ -263,8 +428,17 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  const logout = () => {
+    clearSession();
+    setMessages([]);
+    setLoaded(false);
+    skipSmooth.current = true;
+    historyIds.current = new Set();
+    setUsername(null);
+  };
+
   if (!username) {
-    return <LoginScreen onLogin={setUsername} />;
+    return <AuthScreen onAuth={setUsername} />;
   }
 
   return (
@@ -318,13 +492,31 @@ export default function ChatPage() {
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#86efac" }}>● Online</div>
             </div>
-            <div style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
-              {username}
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
+                {username}
+              </div>
+              <button
+                onClick={logout}
+                style={{
+                  marginTop: 2,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontFamily: "'Nunito', sans-serif",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#c084a0",
+                  padding: 0,
+                }}
+              >
+                Вийти
+              </button>
             </div>
           </div>
 
           {/* Messages */}
-          <div style={{
+          <div ref={listRef} style={{
             flex: 1, overflowY: "auto",
             padding: "16px 18px",
             display: "flex", flexDirection: "column",
@@ -341,7 +533,14 @@ export default function ChatPage() {
               Сьогодні
             </div>
 
-            {messages.map(msg => <Bubble key={msg.id} msg={msg} username={username} />)}
+            {messages.map(msg => (
+              <Bubble
+                key={msg.id}
+                msg={msg}
+                username={username}
+                animate={!historyIds.current.has(msg.id)}
+              />
+            ))}
             <div ref={bottomRef} />
           </div>
 
