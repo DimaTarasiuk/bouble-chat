@@ -35,7 +35,12 @@ type createMessageRequest struct{
 }
 
 func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
-	
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req createMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("JSON decode error: %v", err)
@@ -43,9 +48,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received message from %s: %s", req.From, req.Text)
+	log.Printf("Received message from %s: %s", user.Username, req.Text)
 
-	message, err := h.svc.Create(r.Context(), req.From, req.Text)
+	message, err := h.svc.Create(r.Context(), user.Username, req.Text)
 	if err != nil {
 		log.Printf("Service error: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
