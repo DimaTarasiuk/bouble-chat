@@ -11,15 +11,21 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+type envelope struct {
+	conversationID int64
+	payload        []byte
+}
+
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	hub            *Hub
+	conn           *websocket.Conn
+	send           chan []byte
+	conversationID int64
 }
 
 type Hub struct {
 	clients    map[*Client]bool
-	broadcast  chan []byte
+	broadcast  chan envelope
 	register   chan *Client
 	unregister chan *Client
 }
@@ -27,14 +33,14 @@ type Hub struct {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte, 100),
+		broadcast:  make(chan envelope, 100),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
 }
 
-func (h *Hub) Broadcast(message []byte) {
-	h.broadcast <- message
+func (h *Hub) BroadcastTo(conversationID int64, message []byte) {
+	h.broadcast <- envelope{conversationID: conversationID, payload: message}
 }
 
 func (h *Hub) Run() {
@@ -51,14 +57,14 @@ func (h *Hub) Run() {
 				log.Printf("Client unregistered. Total clients: %d", len(h.clients))
 			}
 
-		case message := <-h.broadcast:
-			log.Printf("📢 Broadcasting to %d clients", len(h.clients))
+		case msg := <-h.broadcast:
 			for client := range h.clients {
+				if client.conversationID != msg.conversationID {
+					continue
+				}
 				select {
-				case client.send <- message:
-					log.Printf("   -> Sent to one client")
+				case client.send <- msg.payload:
 				default:
-					log.Printf("   -> Client channel full, closing")
 					close(client.send)
 					delete(h.clients, client)
 				}
@@ -69,40 +75,28 @@ func (h *Hub) Run() {
 
 func (c *Client) readPump() {
 	defer func() {
-		log.Println("readPump ended, unregistering client")
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
 
 	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			log.Printf("Read error: %v", err)
+		if _, _, err := c.conn.ReadMessage(); err != nil {
 			break
 		}
-		log.Printf("Message from client: %s", string(message))
-		c.hub.broadcast <- message
 	}
 }
 
 func (c *Client) writePump() {
-	defer func() {
-		log.Println("writePump ended")
-		c.conn.Close()
-	}()
+	defer c.conn.Close()
 
 	for message := range c.send {
-		err := c.conn.WriteMessage(websocket.TextMessage, message)
-		if err != nil {
-			log.Printf("Write error: %v", err)
+		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 			break
 		}
 	}
 }
 
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	log.Println("New WS connection attempt...")
-
+func (h *Hub) ServeConversation(w http.ResponseWriter, r *http.Request, conversationID int64) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Upgrade failed: %v", err)
@@ -110,14 +104,13 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{
-		hub:  h,
-		conn: conn,
-		send: make(chan []byte, 256),
+		hub:            h,
+		conn:           conn,
+		send:           make(chan []byte, 256),
+		conversationID: conversationID,
 	}
 
-	log.Println("Client upgraded, registering...")
 	h.register <- client
-
 	go client.readPump()
 	go client.writePump()
 }
