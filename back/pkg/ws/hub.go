@@ -18,6 +18,11 @@ type envelope struct {
 	payload        []byte
 }
 
+type userEnvelope struct {
+	username string
+	payload  []byte
+}
+
 type Client struct {
 	hub            *Hub
 	conn           *websocket.Conn
@@ -30,6 +35,7 @@ type Hub struct {
 	clients    map[*Client]bool
 	online     map[string]int
 	broadcast  chan envelope
+	notifyUser chan userEnvelope
 	register   chan *Client
 	unregister chan *Client
 }
@@ -39,6 +45,7 @@ func NewHub() *Hub {
 		clients:    make(map[*Client]bool),
 		online:     make(map[string]int),
 		broadcast:  make(chan envelope, 100),
+		notifyUser: make(chan userEnvelope, 100),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
@@ -46,6 +53,13 @@ func NewHub() *Hub {
 
 func (h *Hub) BroadcastTo(conversationID int64, message []byte) {
 	h.broadcast <- envelope{conversationID: conversationID, payload: message}
+}
+
+func (h *Hub) NotifyUser(username string, message []byte) {
+	if username == "" {
+		return
+	}
+	h.notifyUser <- userEnvelope{username: username, payload: message}
 }
 
 func (h *Hub) Run() {
@@ -70,6 +84,22 @@ func (h *Hub) Run() {
 			var stale []*Client
 			for client := range h.clients {
 				if client.conversationID != msg.conversationID {
+					continue
+				}
+				select {
+				case client.send <- msg.payload:
+				default:
+					stale = append(stale, client)
+				}
+			}
+			for _, client := range stale {
+				h.removeClient(client)
+			}
+
+		case msg := <-h.notifyUser:
+			var stale []*Client
+			for client := range h.clients {
+				if client.conversationID != 0 || client.username != msg.username {
 					continue
 				}
 				select {

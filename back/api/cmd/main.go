@@ -72,6 +72,8 @@ func main() {
 		r.Post("/api/conversations", chatH.Create)
 		r.Get("/api/conversations/{id}/messages", chatH.GetMessages)
 		r.Post("/api/conversations/{id}/messages", chatH.SendMessage)
+		r.Post("/api/conversations/{id}/read", chatH.MarkRead)
+		r.Patch("/api/conversations/{id}/messages/{msgId}", chatH.EditMessage)
 
 		r.Post("/api/admin/users/role", authH.SetRole)
 	})

@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 
 	"chat.com/internal/domain"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,7 +17,9 @@ type MessageRepository struct {
 
 type MessageRepo interface {
 	GetByConversation(ctx context.Context, conversationID int64) ([]domain.Message, error)
+	GetByID(ctx context.Context, id int64) (domain.Message, int64, error)
 	Create(ctx context.Context, conversationID int64, from string, text string) (domain.Message, error)
+	UpdateText(ctx context.Context, id int64, text string) (domain.Message, error)
 }
 
 func NewMessageRepository() *MessageRepository {
@@ -70,4 +74,38 @@ func (r *MessageRepository) Create(ctx context.Context, conversationID int64, fr
 		&m.ID, &m.From, &m.Text, &m.CreatedAt,
 	)
 	return m, err
+}
+
+func (r *MessageRepository) GetByID(ctx context.Context, id int64) (domain.Message, int64, error) {
+	var m domain.Message
+	var conversationID int64
+	err := r.db.QueryRow(ctx, `
+		SELECT id, username, message_content, created_at, conversation_id
+		FROM messages
+		WHERE id = $1
+	`, id).Scan(&m.ID, &m.From, &m.Text, &m.CreatedAt, &conversationID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Message{}, 0, ErrNotFound
+		}
+		return domain.Message{}, 0, err
+	}
+	return m, conversationID, nil
+}
+
+func (r *MessageRepository) UpdateText(ctx context.Context, id int64, text string) (domain.Message, error) {
+	var m domain.Message
+	err := r.db.QueryRow(ctx, `
+		UPDATE messages
+		SET message_content = $2
+		WHERE id = $1
+		RETURNING id, username, message_content, created_at
+	`, id, text).Scan(&m.ID, &m.From, &m.Text, &m.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Message{}, ErrNotFound
+		}
+		return domain.Message{}, err
+	}
+	return m, nil
 }

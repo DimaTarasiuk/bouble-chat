@@ -141,9 +141,55 @@ function Avatar({ initials, color }) {
   );
 }
 
-function Bubble({ msg, username, animate = false }) {
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+function canEditMessage(msg, username) {
+  if (!msg || msg.from !== username) return false;
+  if (typeof msg.id !== "number") return false;
+  const created = new Date(msg.time).getTime();
+  if (Number.isNaN(created)) return false;
+  return Date.now() - created <= EDIT_WINDOW_MS;
+}
+
+function Bubble({ msg, username, animate = false, onEdit }) {
   const isMe = msg.from === username;
   const initials = (msg.from || "?").slice(0, 2).toUpperCase();
+  const longPressRef = useRef(null);
+  const movedRef = useRef(false);
+
+  const clearLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  const onPointerDown = (e) => {
+    if (!isMe || !onEdit || !canEditMessage(msg, username)) return;
+    if (e.button != null && e.button !== 0) return;
+    movedRef.current = false;
+    clearLongPress();
+    longPressRef.current = setTimeout(() => {
+      longPressRef.current = null;
+      haptic(18);
+      onEdit(msg);
+    }, 480);
+  };
+
+  const onPointerMove = (e) => {
+    if (!longPressRef.current) return;
+    // cancel if finger slides
+    if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) {
+      movedRef.current = true;
+      clearLongPress();
+    }
+  };
+
+  const onPointerUp = () => clearLongPress();
+  const onPointerCancel = () => clearLongPress();
+  const onContextMenu = (e) => {
+    if (isMe && canEditMessage(msg, username)) e.preventDefault();
+  };
 
   return (
     <div style={{
@@ -162,19 +208,31 @@ function Bubble({ msg, username, animate = false }) {
             {msg.from}
           </span>
         )}
-        <div style={{
-          padding: "11px 16px",
-          borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: isMe ? "#ffffff" : "#f5e8ee",
-          boxShadow: isMe
-            ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
-            : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
-          fontSize: 14,
-          fontWeight: 600,
-          color: "#4b5563",
-          lineHeight: 1.5,
-          fontFamily: "'Nunito', sans-serif",
-        }}>
+        <div
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onPointerLeave={onPointerUp}
+          onContextMenu={onContextMenu}
+          style={{
+            padding: "11px 16px",
+            borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+            background: isMe ? "#ffffff" : "#f5e8ee",
+            boxShadow: isMe
+              ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
+              : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
+            fontSize: 14,
+            fontWeight: 600,
+            color: "#4b5563",
+            lineHeight: 1.5,
+            fontFamily: "'Nunito', sans-serif",
+            touchAction: "manipulation",
+            userSelect: isMe ? "none" : "auto",
+            WebkitUserSelect: isMe ? "none" : "auto",
+            cursor: isMe && canEditMessage(msg, username) ? "pointer" : "default",
+          }}
+        >
           {msg.text}
         </div>
         <span style={{
@@ -735,26 +793,11 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
+function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
-  const [chats, setChats] = useState([]);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
-      .then(async res => {
-        if (res.status === 401) {
-          clearSession();
-          onLogout();
-          return [];
-        }
-        return res.json();
-      })
-      .then(data => setChats(Array.isArray(data) ? data : []))
-      .catch(() => setChats([]));
-  }, [onLogout]);
 
   useEffect(() => {
     const q = query.trim();
@@ -785,7 +828,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
           : "Не вдалося відкрити чат");
         return;
       }
-      onOpen({ id: data.id, peer: data.peer });
+      onOpen({ id: data.id, peer: data.peer, unread_count: data.unread_count || 0 });
     } catch {
       setError("Не вдалося відкрити чат");
     }
@@ -862,6 +905,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
           </div>
         ) : chats.map(c => {
           const isOnline = online.has(c.peer);
+          const unread = Number(c.unread_count) || 0;
           return (
           <button
             key={c.id}
@@ -892,12 +936,31 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
                 boxShadow: `0 0 0 2px ${NEU_BG}`,
               }}/>
             </div>
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
               <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
                 {isOnline ? "● Online" : "Offline"}
               </div>
             </div>
+            {unread > 0 && (
+              <div style={{
+                minWidth: 22,
+                height: 22,
+                padding: "0 7px",
+                borderRadius: 50,
+                background: "#c084a0",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                boxShadow: neu(false, 2, 4),
+              }}>
+                {unread > 99 ? "99+" : unread}
+              </div>
+            )}
           </button>
           );
         })}
@@ -916,9 +979,11 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [editingId, setEditingId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
+  const [chats, setChats] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileHint, setProfileHint] = useState(
     () => localStorage.getItem(PROFILE_HINT_KEY) !== "1"
@@ -926,6 +991,7 @@ export default function ChatPage() {
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
+  const activeChatRef = useRef(null);
   const [historyIds, setHistoryIds] = useState(() => new Set());
   const notificationSound = useRef(null);
 
@@ -944,6 +1010,33 @@ export default function ChatPage() {
     setRole(session.role || "user");
   };
 
+  const loadChats = () => {
+    fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
+      .then(async res => {
+        if (res.status === 401) {
+          clearSession();
+          applyAuth(null);
+          return [];
+        }
+        return res.json();
+      })
+      .then(data => setChats(Array.isArray(data) ? data : []))
+      .catch(() => setChats([]));
+  };
+
+  const markChatRead = (convId) => {
+    if (!convId) return;
+    setChats(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+    fetch(`${API_URL}/api/conversations/${convId}/read`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
   useEffect(() => {
     notificationSound.current = createNotificationSound();
     return () => {
@@ -951,6 +1044,14 @@ export default function ChatPage() {
       notificationSound.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!username) {
+      setChats([]);
+      return;
+    }
+    loadChats();
+  }, [username]);
 
   useEffect(() => {
     if (!username) return;
@@ -1002,6 +1103,27 @@ export default function ChatPage() {
             else next.delete(data.user);
             return next;
           });
+          return;
+        }
+        if (data.type === "chat_message" && data.conversation_id) {
+          if (data.from === username) return;
+          const openId = activeChatRef.current?.id;
+          if (openId === data.conversation_id) {
+            markChatRead(data.conversation_id);
+            return;
+          }
+          setChats(prev => {
+            const idx = prev.findIndex(c => c.id === data.conversation_id);
+            if (idx === -1) {
+              loadChats();
+              return prev;
+            }
+            const updated = [...prev];
+            const cur = updated[idx];
+            updated[idx] = { ...cur, unread_count: (Number(cur.unread_count) || 0) + 1 };
+            return updated;
+          });
+          playNotification(notificationSound);
         }
       } catch (err) {
         console.error("Presence parse error:", err);
@@ -1067,7 +1189,11 @@ export default function ChatPage() {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type || typeof msg.text !== "string" || !msg.time) return;
+        let shouldNotify = false;
         setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) {
+            return prev.map(m => (m.id === msg.id ? msg : m));
+          }
           // замінюємо тимчасове повідомлення на реальне
           const tempIndex = prev.findIndex(m =>
             typeof m.id === "string" && m.id.startsWith("temp-") && m.from === msg.from
@@ -1077,13 +1203,15 @@ export default function ChatPage() {
             updated[tempIndex] = msg;
             return updated;
           }
-          // не додаємо дублікати
-          if (prev.some(m => m.id === msg.id)) return prev;
+          shouldNotify = msg.from !== username;
           return [...prev, msg];
         });
 
-        if (msg.from !== username) {
+        if (shouldNotify) {
           playNotification(notificationSound);
+        }
+        if (msg.from !== username && activeChat?.id) {
+          markChatRead(activeChat.id);
         }
       } catch (err) {
         console.error("WS parse error:", err);
@@ -1093,9 +1221,46 @@ export default function ChatPage() {
     return () => ws.close();
   }, [username, activeChat]);
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setInput("");
+  };
+
+  const startEdit = (msg) => {
+    if (!canEditMessage(msg, username)) return;
+    setEditingId(msg.id);
+    setInput(msg.text || "");
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || !username || !activeChat) return;
+
+    if (editingId != null) {
+      const msgId = editingId;
+      setEditingId(null);
+      setInput("");
+      try {
+        const res = await fetch(`${API_URL}/api/conversations/${activeChat.id}/messages/${msgId}`, {
+          method: "PATCH",
+          headers: authHeaders(),
+          body: JSON.stringify({ text }),
+        });
+        if (res.status === 401) {
+          clearSession();
+          applyAuth(null);
+          return;
+        }
+        const savedMsg = await res.json().catch(() => ({}));
+        if (!res.ok || typeof savedMsg.text !== "string") {
+          return;
+        }
+        setMessages(prev => prev.map(m => m.id === msgId ? savedMsg : m));
+      } catch (err) {
+        console.error("Помилка редагування:", err);
+      }
+      return;
+    }
 
     const tempId = "temp-" + Date.now();
     const tempMessage = {
@@ -1133,6 +1298,11 @@ export default function ChatPage() {
   };
 
   const onKey = (e) => {
+    if (e.key === "Escape" && editingId != null) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
@@ -1142,7 +1312,16 @@ export default function ChatPage() {
     setMessages([]);
     setLoaded(false);
     setInput("");
+    setEditingId(null);
     setActiveChat(chat);
+    setChats(prev => {
+      const exists = prev.some(c => c.id === chat.id);
+      if (exists) {
+        return prev.map(c => c.id === chat.id ? { ...c, unread_count: 0 } : c);
+      }
+      return [{ id: chat.id, peer: chat.peer, unread_count: 0 }, ...prev];
+    });
+    markChatRead(chat.id);
   };
 
   const closeChat = () => {
@@ -1151,6 +1330,8 @@ export default function ChatPage() {
     setLoaded(false);
     skipSmooth.current = true;
     setHistoryIds(new Set());
+    setInput("");
+    setEditingId(null);
   };
 
   const logout = () => {
@@ -1162,6 +1343,7 @@ export default function ChatPage() {
     setActiveChat(null);
     setOnlineUsers(new Set());
     setOnlineCount(0);
+    setChats([]);
     setProfileOpen(false);
     applyAuth(null);
   };
@@ -1293,7 +1475,7 @@ export default function ChatPage() {
           </div>
 
           {!activeChat ? (
-            <ConversationsScreen onOpen={openChat} onLogout={logout} onlineUsers={onlineUsers} />
+            <ConversationsScreen onOpen={openChat} onLogout={logout} onlineUsers={onlineUsers} chats={chats} />
           ) : (
             <>
           {/* Messages */}
@@ -1320,13 +1502,31 @@ export default function ChatPage() {
                 msg={msg}
                 username={username}
                 animate={!historyIds.has(msg.id)}
+                onEdit={startEdit}
               />
             ))}
             <div ref={bottomRef} />
           </div>
 
           {/* Input */}
-          <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {editingId != null && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "0 4px",
+              }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#6b8fb5" }}>Редагування</span>
+                <button
+                  className="neu-press-soft"
+                  onClick={cancelEdit}
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer",
+                    fontFamily: "'Nunito', sans-serif", fontSize: 12, fontWeight: 700, color: "#9ca3af",
+                  }}
+                >Скасувати</button>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               flex: 1, display: "flex", alignItems: "center",
               background: NEU_BG, borderRadius: 50,
@@ -1336,7 +1536,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
-                placeholder="Написати повідомлення..."
+                placeholder={editingId != null ? "Змінити повідомлення..." : "Написати повідомлення..."}
                 style={{
                   flex: 1, border: "none", outline: "none",
                   background: "transparent",
@@ -1369,6 +1569,7 @@ export default function ChatPage() {
                 <polygon points="22 2 15 22 11 13 2 9 22 2"/>
               </svg>
             </button>
+            </div>
           </div>
             </>
           )}

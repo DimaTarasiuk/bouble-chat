@@ -108,6 +108,30 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, messages)
 }
 
+func (h *ConversationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	convID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	if err := h.svc.MarkRead(r.Context(), user.ID, convID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 type sendMessageRequest struct {
 	Text string `json:"text"`
 }
@@ -148,9 +172,70 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		h.hub.BroadcastTo(convID, data)
 	}
 
+	if conv, err := h.svc.Get(r.Context(), user.ID, convID); err == nil {
+		if notify, err := json.Marshal(map[string]any{
+			"type":            "chat_message",
+			"conversation_id": convID,
+			"from":            message.From,
+			"id":              message.ID,
+		}); err == nil {
+			h.hub.NotifyUser(conv.Peer, notify)
+		}
+	}
+
+	_ = h.svc.MarkRead(r.Context(), user.ID, convID)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(message)
+}
+
+func (h *ConversationHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	convID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	msgID, err := strconv.ParseInt(chi.URLParam(r, "msgId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	var req sendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	message, err := h.svc.EditMessage(r.Context(), user.ID, user.Username, convID, msgID, req.Text)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrEmptyText):
+			writeError(w, http.StatusBadRequest, "text required")
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden")
+		case errors.Is(err, service.ErrEditExpired):
+			writeError(w, http.StatusForbidden, "edit window expired")
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	if data, err := json.Marshal(message); err == nil {
+		h.hub.BroadcastTo(convID, data)
+	}
+
+	writeJSON(w, http.StatusOK, message)
 }
 
 func (h *ConversationHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
