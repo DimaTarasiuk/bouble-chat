@@ -893,7 +893,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
-  const [listMode, setListMode] = useState("chats"); // chats | users | stats | news
+  const [listMode, setListMode] = useState("chats");
   const [cardUser, setCardUser] = useState(null);
 
   useEffect(() => {

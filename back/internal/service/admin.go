@@ -43,7 +43,6 @@ func (s *AdminService) UserCard(ctx context.Context, username string, online boo
 	}, nil
 }
 
-// moderationTarget loads the target and refuses self-moderation or touching another head.
 func (s *AdminService) moderationTarget(ctx context.Context, actorID int64, username string) (domain.User, error) {
 	target, err := s.users.GetByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {

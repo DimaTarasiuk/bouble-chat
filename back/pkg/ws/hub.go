@@ -60,7 +60,6 @@ func NewHub(onOffline func(username string)) *Hub {
 	}
 }
 
-// KickUser sends a force_logout event to every socket of username and closes them.
 func (h *Hub) KickUser(username, reason string) {
 	if username == "" {
 		return
@@ -75,7 +74,6 @@ func (h *Hub) KickUser(username, reason string) {
 	h.kickUser <- userEnvelope{username: username, payload: payload}
 }
 
-// BroadcastPresence sends payload to every presence (conversation-less) socket.
 func (h *Hub) BroadcastPresence(payload []byte) {
 	h.presenceAll <- payload
 }
@@ -159,7 +157,6 @@ func (h *Hub) Run() {
 				case client.send <- msg.payload:
 				default:
 				}
-				// closing send lets writePump flush the event, then close the socket
 				h.removeClient(client)
 			}
 

@@ -29,7 +29,6 @@ type User struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-// AuthState is the per-request view of a user used to validate tokens.
 type AuthState struct {
 	Username          string
 	Role              string
