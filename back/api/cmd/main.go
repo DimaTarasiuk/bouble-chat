@@ -61,6 +61,7 @@ func main() {
 	r.Post("/api/register", authH.Register)
 	r.Post("/api/login", authH.Login)
 	r.Get("/ws", authH.WSAuth(chatH.ServeWS))
+	r.Get("/ws/presence", authH.WSAuth(chatH.ServePresence))
 
 	r.Group(func(r chi.Router) {
 		r.Use(authH.Middleware)
@@ -100,7 +101,7 @@ func serveFrontend(r *chi.Mux) {
 	}
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, "/api/") || req.URL.Path == "/ws" {
+		if strings.HasPrefix(req.URL.Path, "/api/") || strings.HasPrefix(req.URL.Path, "/ws") {
 			http.NotFound(w, req)
 			return
 		}

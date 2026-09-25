@@ -1,8 +1,10 @@
 package ws
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,11 +22,13 @@ type Client struct {
 	hub            *Hub
 	conn           *websocket.Conn
 	send           chan []byte
-	conversationID int64
+	conversationID int64 // 0 = presence-only
+	username       string
 }
 
 type Hub struct {
 	clients    map[*Client]bool
+	online     map[string]int
 	broadcast  chan envelope
 	register   chan *Client
 	unregister chan *Client
@@ -33,6 +37,7 @@ type Hub struct {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
+		online:     make(map[string]int),
 		broadcast:  make(chan envelope, 100),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -48,16 +53,21 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-			log.Printf("Client registered. Total clients: %d", len(h.clients))
-
-		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-				log.Printf("Client unregistered. Total clients: %d", len(h.clients))
+			wasOffline := h.online[client.username] == 0
+			h.online[client.username]++
+			log.Printf("Client registered (%s). Total clients: %d", client.username, len(h.clients))
+			if wasOffline {
+				h.fanoutPresence(client.username, true)
+			}
+			if client.conversationID == 0 {
+				h.sendSnapshot(client)
 			}
 
+		case client := <-h.unregister:
+			h.removeClient(client)
+
 		case msg := <-h.broadcast:
+			var stale []*Client
 			for client := range h.clients {
 				if client.conversationID != msg.conversationID {
 					continue
@@ -65,11 +75,82 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- msg.payload:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					stale = append(stale, client)
 				}
 			}
+			for _, client := range stale {
+				h.removeClient(client)
+			}
 		}
+	}
+}
+
+func (h *Hub) removeClient(client *Client) {
+	if _, ok := h.clients[client]; !ok {
+		return
+	}
+	delete(h.clients, client)
+	close(client.send)
+
+	h.online[client.username]--
+	wentOffline := false
+	if h.online[client.username] <= 0 {
+		delete(h.online, client.username)
+		wentOffline = true
+	}
+	log.Printf("Client unregistered (%s). Total clients: %d", client.username, len(h.clients))
+	if wentOffline {
+		h.fanoutPresence(client.username, false)
+	}
+}
+
+func (h *Hub) onlineList() []string {
+	list := make([]string, 0, len(h.online))
+	for user, n := range h.online {
+		if n > 0 {
+			list = append(list, user)
+		}
+	}
+	sort.Strings(list)
+	return list
+}
+
+func (h *Hub) sendSnapshot(client *Client) {
+	payload, err := json.Marshal(map[string]any{
+		"type":   "presence_snapshot",
+		"online": h.onlineList(),
+	})
+	if err != nil {
+		return
+	}
+	select {
+	case client.send <- payload:
+	default:
+	}
+}
+
+func (h *Hub) fanoutPresence(username string, online bool) {
+	payload, err := json.Marshal(map[string]any{
+		"type":   "presence",
+		"user":   username,
+		"online": online,
+	})
+	if err != nil {
+		return
+	}
+	var stale []*Client
+	for client := range h.clients {
+		if client.conversationID != 0 {
+			continue
+		}
+		select {
+		case client.send <- payload:
+		default:
+			stale = append(stale, client)
+		}
+	}
+	for _, client := range stale {
+		h.removeClient(client)
 	}
 }
 
@@ -96,7 +177,7 @@ func (c *Client) writePump() {
 	}
 }
 
-func (h *Hub) ServeConversation(w http.ResponseWriter, r *http.Request, conversationID int64) {
+func (h *Hub) serve(w http.ResponseWriter, r *http.Request, conversationID int64, username string) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Upgrade failed: %v", err)
@@ -108,9 +189,18 @@ func (h *Hub) ServeConversation(w http.ResponseWriter, r *http.Request, conversa
 		conn:           conn,
 		send:           make(chan []byte, 256),
 		conversationID: conversationID,
+		username:       username,
 	}
 
 	h.register <- client
 	go client.readPump()
 	go client.writePump()
+}
+
+func (h *Hub) ServeConversation(w http.ResponseWriter, r *http.Request, conversationID int64, username string) {
+	h.serve(w, r, conversationID, username)
+}
+
+func (h *Hub) ServePresence(w http.ResponseWriter, r *http.Request, username string) {
+	h.serve(w, r, 0, username)
 }

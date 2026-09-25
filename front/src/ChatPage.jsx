@@ -412,7 +412,8 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function ConversationsScreen({ onOpen, onLogout }) {
+function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
+  const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [chats, setChats] = useState([]);
@@ -491,7 +492,9 @@ function ConversationsScreen({ onOpen, onLogout }) {
             <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24 }}>
               Нікого не знайдено
             </div>
-          ) : results.map(u => (
+          ) : results.map(u => {
+            const isOnline = online.has(u.username);
+            return (
             <button
               key={u.id}
               className="neu-press"
@@ -512,15 +515,31 @@ function ConversationsScreen({ onOpen, onLogout }) {
                 textAlign: "left",
               }}
             >
-              <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{u.username}</div>
+              <div style={{ position: "relative" }}>
+                <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+                <div style={{
+                  position: "absolute", bottom: 0, right: 0,
+                  width: 9, height: 9, borderRadius: "50%",
+                  background: isOnline ? "#86efac" : "#c5cad3",
+                  boxShadow: `0 0 0 2px ${NEU_BG}`,
+                }}/>
+              </div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{u.username}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
+                  {isOnline ? "● Online" : "Offline"}
+                </div>
+              </div>
             </button>
-          ))
+            );
+          })
         ) : chats.length === 0 ? (
           <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24, padding: "0 12px" }}>
             Немає діалогів. Знайдіть користувача за логіном
           </div>
-        ) : chats.map(c => (
+        ) : chats.map(c => {
+          const isOnline = online.has(c.peer);
+          return (
           <button
             key={c.id}
             className="neu-press"
@@ -541,13 +560,24 @@ function ConversationsScreen({ onOpen, onLogout }) {
               textAlign: "left",
             }}
           >
-            <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+            <div style={{ position: "relative" }}>
+              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+              <div style={{
+                position: "absolute", bottom: 0, right: 0,
+                width: 9, height: 9, borderRadius: "50%",
+                background: isOnline ? "#86efac" : "#c5cad3",
+                boxShadow: `0 0 0 2px ${NEU_BG}`,
+              }}/>
+            </div>
             <div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af" }}>Приватний чат</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
+                {isOnline ? "● Online" : "Offline"}
+              </div>
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
     </>
   );
@@ -563,6 +593,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
@@ -576,6 +607,48 @@ export default function ChatPage() {
       notificationSound.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!username) {
+      setOnlineUsers(new Set());
+      return;
+    }
+
+    const token = localStorage.getItem(TOKEN_KEY);
+    const ws = new WebSocket(
+      `${API_URL.replace("http", "ws")}/ws/presence?token=${encodeURIComponent(token || "")}`
+    );
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "presence_snapshot" && Array.isArray(data.online)) {
+          setOnlineUsers(new Set(data.online));
+          return;
+        }
+        if (data.type === "presence" && data.user) {
+          setOnlineUsers(prev => {
+            const next = new Set(prev);
+            if (data.online) next.add(data.user);
+            else next.delete(data.user);
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error("Presence parse error:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      setOnlineUsers(prev => {
+        const next = new Set(prev);
+        next.delete(username);
+        return next;
+      });
+    };
+
+    return () => ws.close();
+  }, [username]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -624,6 +697,7 @@ export default function ChatPage() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        if (msg.type || typeof msg.text !== "string" || !msg.time) return;
         setMessages(prev => {
           // замінюємо тимчасове повідомлення на реальне
           const tempIndex = prev.findIndex(m =>
@@ -677,6 +751,10 @@ export default function ChatPage() {
         return;
       }
       const savedMsg = await res.json();
+      if (!res.ok || typeof savedMsg.text !== "string" || !savedMsg.time) {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        return;
+      }
       // замінюємо temp на збережене повідомлення з реальним id
       setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
     } catch (err) {
@@ -713,8 +791,11 @@ export default function ChatPage() {
     skipSmooth.current = true;
     setHistoryIds(new Set());
     setActiveChat(null);
+    setOnlineUsers(new Set());
     setUsername(null);
   };
+
+  const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
 
   if (!username) {
     return <AuthScreen onAuth={setUsername} />;
@@ -765,7 +846,7 @@ export default function ChatPage() {
                 <div style={{
                   position: "absolute", bottom: 1, right: 1,
                   width: 10, height: 10, borderRadius: "50%",
-                  background: "#86efac",
+                  background: onlineUsers.has(username) ? "#86efac" : "#c5cad3",
                   boxShadow: `0 0 0 2px ${NEU_BG}`,
                 }}/>
               </div>
@@ -774,8 +855,12 @@ export default function ChatPage() {
               <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
                 {activeChat ? activeChat.peer : <><span style={{ color: "#868e99" }}>Bouble</span> Chat</>}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: activeChat ? "#86efac" : "#9ca3af" }}>
-                {activeChat ? "● Online" : "Приватні чати"}
+              <div style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: activeChat ? (peerOnline ? "#86efac" : "#9ca3af") : "#9ca3af",
+              }}>
+                {activeChat ? (peerOnline ? "● Online" : "Offline") : "Приватні чати"}
               </div>
             </div>
             <div style={{ marginLeft: "auto", textAlign: "right" }}>
@@ -803,7 +888,7 @@ export default function ChatPage() {
           </div>
 
           {!activeChat ? (
-            <ConversationsScreen onOpen={openChat} onLogout={logout} />
+            <ConversationsScreen onOpen={openChat} onLogout={logout} onlineUsers={onlineUsers} />
           ) : (
             <>
           {/* Messages */}

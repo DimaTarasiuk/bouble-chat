@@ -171,7 +171,17 @@ func (h *ConversationHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.hub.ServeConversation(w, r, convID)
+	h.hub.ServeConversation(w, r, convID, user.Username)
+}
+
+func (h *ConversationHandler) ServePresence(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	h.hub.ServePresence(w, r, user.Username)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
