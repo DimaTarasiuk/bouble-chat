@@ -8,6 +8,7 @@ const API_URL = (
 const TOKEN_KEY = "chat_token";
 const USER_KEY = "chat_username";
 const ROLE_KEY = "chat_role";
+const PROFILE_HINT_KEY = "chat_profile_hint_seen";
 
 const isStaffRole = (role) => role === "head" || role === "admin";
 
@@ -86,6 +87,23 @@ function AppStyles() {
       @keyframes fadeUp {
         from { opacity: 0; transform: translateY(10px); }
         to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes profileHintPulse {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
+        }
+        40% {
+          transform: scale(1.1);
+          box-shadow: 0 0 0 0 rgba(192, 132, 160, 0.45), 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
+        }
+        70% {
+          transform: scale(1.04);
+          box-shadow: 0 0 0 10px rgba(192, 132, 160, 0), 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
+        }
+      }
+      .profile-hint-pulse {
+        animation: profileHintPulse 1.35s ease-in-out infinite;
       }
       .neu-press {
         transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
@@ -201,6 +219,7 @@ function NeuField({ type = "text", value, onChange, placeholder, onKey, autoFocu
           fontSize: 14, fontWeight: 600,
           color: "#4b5563",
           padding: "14px 0",
+          minWidth: 0,
         }}
       />
       {isPassword && (
@@ -236,6 +255,305 @@ function NeuField({ type = "text", value, onChange, placeholder, onKey, autoFocu
           )}
         </button>
       )}
+    </div>
+  );
+}
+
+const GENDER_OPTIONS = [
+  { value: "male", label: "Чол" },
+  { value: "female", label: "Жін" },
+];
+
+function isoToBirthDisplay(iso) {
+  if (!iso) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim());
+  if (!m) return "";
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+function birthDisplayToIso(display) {
+  const raw = String(display || "").trim();
+  if (!raw) return "";
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (year < 1900 || year > 2100) return null;
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  if (
+    dt.getUTCFullYear() !== year ||
+    dt.getUTCMonth() !== month - 1 ||
+    dt.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function formatBirthInput(raw) {
+  const digits = String(raw || "").replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+}
+
+function ProfileCard({ onClose, onSaved }) {
+  const [login, setLogin] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [gender, setGender] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+  const [avatarTip, setAvatarTip] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/me`, { headers: authHeaders() })
+      .then(async (res) => {
+        if (res.status === 401) {
+          clearSession();
+          onClose({ logout: true });
+          return null;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled || !data?.user) return;
+        if (data.token) localStorage.setItem(TOKEN_KEY, data.token);
+        const u = data.user;
+        setLogin(u.username || "");
+        setFirstName(u.first_name || "");
+        setLastName(u.last_name || "");
+        setBirthDate(isoToBirthDisplay(u.birth_date));
+        setGender(u.gender || "");
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Не вдалося завантажити профіль");
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!avatarTip) return;
+    const t = setTimeout(() => setAvatarTip(false), 2200);
+    return () => clearTimeout(t);
+  }, [avatarTip]);
+
+  const save = async () => {
+    const username = login.trim();
+    if (!username) {
+      setError("Логін обовʼязковий");
+      return;
+    }
+    const birthIso = birthDisplayToIso(birthDate);
+    if (birthDate.trim() && birthIso === null) {
+      setError("Дата у форматі ДД.ММ.РРРР");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setOkMsg("");
+    try {
+      const res = await fetch(`${API_URL}/api/me`, {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          username,
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          birth_date: birthIso || null,
+          gender,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const messages = {
+          "username already taken": "Такий логін уже зайнятий",
+          "login and password required": "Логін обовʼязковий",
+          "invalid profile": "Перевірте введені дані",
+        };
+        setError(messages[data.error] || "Не вдалося зберегти");
+        return;
+      }
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(USER_KEY, data.user.username);
+      localStorage.setItem(ROLE_KEY, data.user.role || "user");
+      onSaved?.(data.user);
+      setBirthDate(isoToBirthDisplay(data.user.birth_date));
+      setOkMsg("Збережено");
+    } catch {
+      setError("Не вдалося зберегти");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const initials = (login || "?").slice(0, 2).toUpperCase();
+
+  return (
+    <div style={{
+      position: "absolute",
+      inset: 0,
+      background: NEU_BG,
+      display: "flex",
+      flexDirection: "column",
+      zIndex: 20,
+      animation: "fadeUp 0.2s ease both",
+    }}>
+      <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          className="neu-press"
+          onClick={() => onClose()}
+          style={{
+            width: 44, height: 44, borderRadius: "50%",
+            border: "none", background: NEU_BG,
+            boxShadow: neu(false, 4, 8),
+            cursor: "pointer",
+            fontSize: 18, fontWeight: 800, color: "#6b8fb5",
+          }}
+        >←</button>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>Профіль</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>Ці дані видно тільки Вам</div>
+        </div>
+      </div>
+
+      <div style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "8px 20px 20px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 14,
+      }}>
+        {loading ? (
+          <div style={{ marginTop: 40, fontSize: 13, fontWeight: 600, color: "#9ca3af" }}>Завантаження...</div>
+        ) : (
+          <>
+            <div style={{ position: "relative", marginBottom: 4 }}>
+              <button
+                className="neu-press"
+                onClick={() => setAvatarTip(true)}
+                style={{
+                  width: 88, height: 88, borderRadius: "50%",
+                  border: "none", background: NEU_BG,
+                  boxShadow: neu(false, 6, 12),
+                  cursor: "pointer",
+                  fontSize: 22, fontWeight: 800, color: "#c084a0",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                {initials}
+              </button>
+              {avatarTip && (
+                <div style={{
+                  position: "absolute",
+                  left: "50%",
+                  bottom: -42,
+                  transform: "translateX(-50%)",
+                  whiteSpace: "nowrap",
+                  padding: "8px 12px",
+                  borderRadius: 14,
+                  background: NEU_BG,
+                  boxShadow: neu(false, 3, 6),
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#6b8fb5",
+                  zIndex: 2,
+                }}>
+                  ми ще робимо цю фічу
+                </div>
+              )}
+            </div>
+
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10, marginTop: avatarTip ? 28 : 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Логін</label>
+              <NeuField value={login} onChange={(e) => setLogin(e.target.value)} placeholder="Логін" />
+
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Імʼя</label>
+              <NeuField value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Імʼя" />
+
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Прізвище</label>
+              <NeuField value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Прізвище" />
+
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Дата народження</label>
+              <NeuField
+                value={birthDate}
+                onChange={(e) => setBirthDate(formatBirthInput(e.target.value))}
+                placeholder="ДД.ММ.РРРР"
+              />
+
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Стать</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {GENDER_OPTIONS.map((opt) => {
+                  const active = gender === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="neu-press"
+                      onClick={() => setGender(active ? "" : opt.value)}
+                      style={{
+                        flex: 1,
+                        padding: "12px 0",
+                        border: "none",
+                        borderRadius: 50,
+                        background: NEU_BG,
+                        boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
+                        cursor: "pointer",
+                        fontFamily: "'Nunito', sans-serif",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: active ? "#6b8fb5" : "#9ca3af",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {error && (
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center" }}>{error}</div>
+            )}
+            {okMsg && (
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#86efac", textAlign: "center" }}>{okMsg}</div>
+            )}
+
+            <button
+              className="neu-press"
+              onClick={save}
+              disabled={saving}
+              style={{
+                width: "100%",
+                marginTop: 4,
+                padding: "13px 0",
+                borderRadius: 50,
+                border: "none",
+                background: NEU_BG,
+                cursor: saving ? "default" : "pointer",
+                fontFamily: "'Nunito', sans-serif",
+                fontSize: 14, fontWeight: 800,
+                color: "#6b8fb5",
+                boxShadow: neu(false, 4, 8),
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? "Збереження..." : "Зберегти"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -601,6 +919,10 @@ export default function ChatPage() {
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileHint, setProfileHint] = useState(
+    () => localStorage.getItem(PROFILE_HINT_KEY) !== "1"
+  );
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
@@ -840,11 +1162,30 @@ export default function ChatPage() {
     setActiveChat(null);
     setOnlineUsers(new Set());
     setOnlineCount(0);
+    setProfileOpen(false);
     applyAuth(null);
   };
 
   const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
   const showOnlineStats = isStaffRole(role);
+  const headerInitials = (username || "?").slice(0, 2).toUpperCase();
+
+  const openProfile = () => {
+    if (profileHint) {
+      localStorage.setItem(PROFILE_HINT_KEY, "1");
+      setProfileHint(false);
+    }
+    setProfileOpen(true);
+  };
+
+  const closeProfile = (opts) => {
+    setProfileOpen(false);
+    if (opts?.logout) applyAuth(null);
+  };
+
+  const onProfileSaved = (user) => {
+    applyAuth({ username: user.username, role: user.role || "user" });
+  };
 
   if (!username) {
     return <AuthScreen onAuth={applyAuth} />;
@@ -867,7 +1208,12 @@ export default function ChatPage() {
           boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
           display: "flex", flexDirection: "column",
           overflow: "hidden",
+          position: "relative",
         }}>
+
+          {profileOpen && (
+            <ProfileCard onClose={closeProfile} onSaved={onProfileSaved} />
+          )}
 
           {/* Header */}
           <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
@@ -884,21 +1230,29 @@ export default function ChatPage() {
                 }}
               >←</button>
             ) : (
-              <div style={{ position: "relative" }}>
-                <div style={{
+              <button
+                className={`neu-press${profileHint ? " profile-hint-pulse" : ""}`}
+                onClick={openProfile}
+                style={{
+                  position: "relative",
                   width: 44, height: 44, borderRadius: "50%",
-                  background: NEU_BG,
+                  border: "none", background: NEU_BG,
                   boxShadow: neu(false, 4, 8),
+                  cursor: "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 14, fontWeight: 800, color: "#c084a0",
-                }}>SB</div>
-                <div style={{
+                  fontFamily: "'Nunito', sans-serif",
+                  padding: 0,
+                }}
+              >
+                {headerInitials}
+                <span style={{
                   position: "absolute", bottom: 1, right: 1,
                   width: 10, height: 10, borderRadius: "50%",
                   background: onlineUsers.has(username) ? "#86efac" : "#c5cad3",
                   boxShadow: `0 0 0 2px ${NEU_BG}`,
                 }}/>
-              </div>
+              </button>
             )}
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
