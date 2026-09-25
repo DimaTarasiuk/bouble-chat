@@ -23,8 +23,18 @@ type User struct {
 	BirthDate *string    `json:"birth_date"`
 	Gender    string     `json:"gender"`
 	LastSeen  *time.Time `json:"last_seen"`
+	BannedAt  *time.Time `json:"banned_at"`
+	BanReason string     `json:"ban_reason"`
 	PassHash  string     `json:"-"`
 	CreatedAt time.Time  `json:"created_at"`
+}
+
+// AuthState is the per-request view of a user used to validate tokens.
+type AuthState struct {
+	Username          string
+	Role              string
+	BannedAt          *time.Time
+	SessionsRevokedAt *time.Time
 }
 
 func IsStaff(role string) bool {

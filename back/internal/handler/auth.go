@@ -100,6 +100,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "login and password required")
 		case errors.Is(err, service.ErrInvalidCredentials):
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
+		case errors.Is(err, service.ErrBanned):
+			writeError(w, http.StatusForbidden, "banned")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}
@@ -228,6 +230,7 @@ type adminUserResponse struct {
 	Role      string     `json:"role"`
 	Gender    string     `json:"gender"`
 	Online    bool       `json:"online"`
+	Banned    bool       `json:"banned"`
 	LastSeen  *time.Time `json:"last_seen"`
 	CreatedAt time.Time  `json:"created_at"`
 }
@@ -271,6 +274,7 @@ func (h *AuthHandler) ListAllUsers(w http.ResponseWriter, r *http.Request) {
 			Role:      u.Role,
 			Gender:    u.Gender,
 			Online:    online,
+			Banned:    u.BannedAt != nil,
 			LastSeen:  u.LastSeen,
 			CreatedAt: u.CreatedAt,
 		})
@@ -286,24 +290,48 @@ func (h *AuthHandler) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := jwtpkg.ParseToken(strings.TrimPrefix(header, "Bearer "), h.secret)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+		authUser, status, msg := h.authenticate(r.Context(), strings.TrimPrefix(header, "Bearer "))
+		if status != 0 {
+			writeError(w, status, msg)
 			return
 		}
 
-		role := claims.Role
-		if role == "" {
-			role = domain.RoleUser
-		}
-
-		ctx := context.WithValue(r.Context(), userKey, AuthUser{
-			ID:       claims.UserID,
-			Username: claims.Username,
-			Role:     role,
-		})
+		ctx := context.WithValue(r.Context(), userKey, authUser)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// authenticate returns a non-zero HTTP status and error message when the token is rejected.
+func (h *AuthHandler) authenticate(ctx context.Context, token string) (AuthUser, int, string) {
+	claims, err := jwtpkg.ParseToken(token, h.secret)
+	if err != nil {
+		return AuthUser{}, http.StatusUnauthorized, "unauthorized"
+	}
+
+	var issuedAt time.Time
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
+
+	state, err := h.svc.Authorize(ctx, claims.UserID, issuedAt)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrBanned):
+			return AuthUser{}, http.StatusForbidden, "banned"
+		case errors.Is(err, service.ErrSessionRevoked):
+			return AuthUser{}, http.StatusUnauthorized, "session revoked"
+		case errors.Is(err, repository.ErrNotFound):
+			return AuthUser{}, http.StatusUnauthorized, "unauthorized"
+		default:
+			return AuthUser{}, http.StatusInternalServerError, "internal server error"
+		}
+	}
+
+	return AuthUser{
+		ID:       claims.UserID,
+		Username: state.Username,
+		Role:     state.Role,
+	}, 0, ""
 }
 
 func (h *AuthHandler) RequireRoles(roles ...string) func(http.Handler) http.Handler {
@@ -329,22 +357,13 @@ func (h *AuthHandler) RequireRoles(roles ...string) func(http.Handler) http.Hand
 
 func (h *AuthHandler) WSAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, err := jwtpkg.ParseToken(r.URL.Query().Get("token"), h.secret)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		authUser, status, msg := h.authenticate(r.Context(), r.URL.Query().Get("token"))
+		if status != 0 {
+			http.Error(w, msg, status)
 			return
 		}
 
-		role := claims.Role
-		if role == "" {
-			role = domain.RoleUser
-		}
-
-		ctx := context.WithValue(r.Context(), userKey, AuthUser{
-			ID:       claims.UserID,
-			Username: claims.Username,
-			Role:     role,
-		})
+		ctx := context.WithValue(r.Context(), userKey, authUser)
 		next(w, r.WithContext(ctx))
 	}
 }

@@ -1,38 +1,36 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import notificationMp3 from "./static/bulk-10.mp3";
+import {
+  API_URL,
+  TOKEN_KEY,
+  USER_KEY,
+  ROLE_KEY,
+  PROFILE_HINT_KEY,
+  isStaffRole,
+  isHeadRole,
+  authHeaders,
+  clearSession,
+  ONLINE_OFF,
+  ONLINE_OFF_TEXT,
+  onlineColor,
+  formatDateTime,
+  NEU_BG,
+  SHADOW_D,
+  SHADOW_L,
+  neu,
+  haptic,
+} from "./shared.js";
+import { Avatar, NeuField } from "./ui.jsx";
+import UserCard from "./admin/UserCard.jsx";
+import StatsPanel from "./admin/StatsPanel.jsx";
+import AnnouncementsPanel from "./admin/AnnouncementsPanel.jsx";
+import AnnouncementPopup from "./AnnouncementPopup.jsx";
 
-const API_URL = (
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? "http://localhost:7979" : window.location.origin)
-).replace(/\/$/, "");
-const TOKEN_KEY = "chat_token";
-const USER_KEY = "chat_username";
-const ROLE_KEY = "chat_role";
-const PROFILE_HINT_KEY = "chat_profile_hint_seen";
-
-const isStaffRole = (role) => role === "head" || role === "admin";
-const isHeadRole = (role) => role === "head";
-
-const authHeaders = () => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-};
-
-const clearSession = () => {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  localStorage.removeItem(ROLE_KEY);
-};
-
-const ONLINE_OFF = "#c5cad3";
-const ONLINE_OFF_TEXT = "#9ca3af";
-const onlineColor = (gender) => {
-  if (gender === "male") return "#60a5fa";
-  if (gender === "female") return "#f9a8d4";
-  return "#86efac";
+const mergeAnnouncements = (prev, incoming) => {
+  const seen = new Set(prev.map((a) => a.id));
+  const added = incoming.filter((a) => a?.id && !seen.has(a.id));
+  if (!added.length) return prev;
+  return [...prev, ...added].sort((a, b) => a.id - b.id);
 };
 
 const EMOJIS = [
@@ -77,23 +75,6 @@ const playNotification = (audioRef) => {
     // Ignore autoplay / media errors on mobile.
   }
 };
-
-const NEU_BG = "#e0e5ec";
-const SHADOW_D = "#b8bec7";
-const SHADOW_L = "#ffffff";
-
-const neu = (inset = false, d = 5, b = 10) => {
-  const p = inset ? "inset " : "";
-  return `${p}${d}px ${d}px ${b}px ${SHADOW_D}, ${p}-${d}px -${d}px ${b}px ${SHADOW_L}`;
-};
-
-function haptic(ms = 12) {
-  try {
-    navigator.vibrate?.(ms);
-  } catch {
-    // Vibration is optional and may be blocked by the browser.
-  }
-}
 
 function AppStyles() {
   useEffect(() => {
@@ -150,22 +131,6 @@ function AppStyles() {
         opacity: 0.65;
       }
     `}</style>
-  );
-}
-
-function Avatar({ initials, color }) {
-  return (
-    <div style={{
-      width: 36, height: 36, borderRadius: "50%",
-      background: NEU_BG,
-      boxShadow: neu(false, 3, 6),
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
-      fontSize: 12, fontWeight: 800, color,
-      letterSpacing: "0.02em",
-    }}>
-      {initials}
-    </div>
   );
 }
 
@@ -396,75 +361,6 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
       </div>
 
       {isMe && <Avatar initials={initials} color="#6b8fb5" />}
-    </div>
-  );
-}
-
-function NeuField({ type = "text", value, onChange, placeholder, onKey, autoFocus }) {
-  const [visible, setVisible] = useState(false);
-  const isPassword = type === "password";
-
-  return (
-    <div style={{
-      width: "100%",
-      display: "flex", alignItems: "center",
-      background: NEU_BG,
-      borderRadius: 50,
-      boxShadow: neu(true, 4, 8),
-      padding: isPassword ? "0 12px 0 20px" : "0 20px",
-    }}>
-      <input
-        type={isPassword && visible ? "text" : type}
-        value={value}
-        onChange={onChange}
-        onKeyDown={onKey}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        autoComplete={isPassword ? "current-password" : undefined}
-        style={{
-          flex: 1,
-          border: "none", outline: "none",
-          background: "transparent",
-          fontFamily: "'Nunito', sans-serif",
-          fontSize: 14, fontWeight: 600,
-          color: "#4b5563",
-          padding: "14px 0",
-          minWidth: 0,
-        }}
-      />
-      {isPassword && (
-        <button
-          type="button"
-          className="neu-press-soft"
-          onClick={() => setVisible(v => !v)}
-          aria-label={visible ? "Сховати пароль" : "Показати пароль"}
-          style={{
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            padding: "6px 8px",
-            color: "#9ca3af",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          {visible ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-              <line x1="1" y1="1" x2="23" y2="23"/>
-              <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
-            </svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-          )}
-        </button>
-      )}
     </div>
   );
 }
@@ -768,7 +664,7 @@ function ProfileCard({ onClose, onSaved }) {
   );
 }
 
-function AuthScreen({ onAuth }) {
+function AuthScreen({ onAuth, notice = "" }) {
   const [mode, setMode] = useState("login");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -827,6 +723,7 @@ function AuthScreen({ onAuth }) {
           "gender required": "Оберіть стать",
           "username already taken": "Такий логін уже зайнятий",
           "invalid credentials": "Невірний логін або пароль",
+          "banned": "Акаунт заблоковано",
         };
         setError(messages[data.error] || (isRegister ? "Не вдалося зареєструватися" : "Не вдалося увійти"));
         return;
@@ -936,6 +833,12 @@ function AuthScreen({ onAuth }) {
           </>
         )}
 
+        {notice && !error && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center" }}>
+            {notice}
+          </div>
+        )}
+
         {error && (
           <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center" }}>
             {error}
@@ -985,12 +888,13 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adminUsers, onOpenUser }) {
+function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
-  const [listMode, setListMode] = useState("chats"); // chats | users
+  const [listMode, setListMode] = useState("chats"); // chats | users | stats | news
+  const [cardUser, setCardUser] = useState(null);
 
   useEffect(() => {
     const q = query.trim();
@@ -1034,26 +938,17 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
     return (u.username || "").toLowerCase().includes(q);
   });
 
-  const formatLastSeen = (iso) => {
-    if (!iso) return "ще не заходив";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "ще не заходив";
-    return d.toLocaleString("uk-UA", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  const formatLastSeen = (iso) => formatDateTime(iso, "ще не заходив");
 
   return (
     <>
       {isHead && (
-        <div style={{ display: "flex", gap: 8, padding: "12px 20px 0" }}>
+        <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
           {[
             { id: "chats", label: "Чати" },
-            { id: "users", label: "Усі юзери" },
+            { id: "users", label: "Юзери" },
+            { id: "stats", label: "Статистика" },
+            { id: "news", label: "Оголошення" },
           ].map((tab) => {
             const active = listMode === tab.id;
             return (
@@ -1064,6 +959,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                 onClick={() => { setListMode(tab.id); setQuery(""); setError(""); }}
                 style={{
                   flex: 1,
+                  minWidth: 0,
                   padding: "10px 0",
                   border: "none",
                   borderRadius: 50,
@@ -1071,7 +967,10 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                   boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
                   cursor: "pointer",
                   fontFamily: "'Nunito', sans-serif",
-                  fontSize: 12,
+                  fontSize: 11,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                   fontWeight: 800,
                   color: active ? "#6b8fb5" : "#9ca3af",
                 }}
@@ -1083,13 +982,29 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
         </div>
       )}
 
-      <div style={{ padding: "16px 20px 8px" }}>
-        <NeuField
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder={listMode === "users" ? "Фільтр юзерів..." : "Пошук за логіном..."}
+      {cardUser && (
+        <UserCard
+          username={cardUser}
+          online={online.has(cardUser)}
+          onClose={() => setCardUser(null)}
+          onOpenChat={(name) => {
+            setCardUser(null);
+            if (onOpenUser) onOpenUser(name);
+            else openUser(name);
+          }}
+          onChanged={onAdminUsersChanged}
         />
-      </div>
+      )}
+
+      {(listMode === "chats" || listMode === "users") && (
+        <div style={{ padding: "16px 20px 8px" }}>
+          <NeuField
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={listMode === "users" ? "Фільтр юзерів..." : "Пошук за логіном..."}
+          />
+        </div>
+      )}
 
       {error && (
         <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center", padding: "0 20px 8px" }}>
@@ -1098,7 +1013,11 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
       )}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px 16px" }}>
-        {listMode === "users" ? (
+        {listMode === "stats" ? (
+          <StatsPanel />
+        ) : listMode === "news" ? (
+          <AnnouncementsPanel />
+        ) : listMode === "users" ? (
           filteredAdminUsers.length === 0 ? (
             <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24 }}>
               Немає користувачів
@@ -1110,7 +1029,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
               <button
                 key={u.id}
                 className="neu-press"
-                onClick={() => (onOpenUser ? onOpenUser(u.username) : openUser(u.username))}
+                onClick={() => setCardUser(u.username)}
                 style={{
                   width: "100%",
                   display: "flex",
@@ -1141,6 +1060,9 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                     {u.username}
                     {u.role && u.role !== "user" ? (
                       <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}> · {u.role}</span>
+                    ) : null}
+                    {u.banned ? (
+                      <span style={{ fontSize: 11, fontWeight: 800, color: "#c084a0" }}> · бан</span>
                     ) : null}
                   </div>
                   <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
@@ -1288,6 +1210,8 @@ export default function ChatPage() {
   const [chats, setChats] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState([]);
+  const [authNotice, setAuthNotice] = useState("");
   const [profileHint, setProfileHint] = useState(
     () => localStorage.getItem(PROFILE_HINT_KEY) !== "1"
   );
@@ -1311,6 +1235,7 @@ export default function ChatPage() {
       setRole(localStorage.getItem(ROLE_KEY) || "user");
       return;
     }
+    setAuthNotice("");
     setUsername(session.username);
     setRole(session.role || "user");
   };
@@ -1342,6 +1267,36 @@ export default function ChatPage() {
       })
       .then((data) => setAdminUsers(Array.isArray(data) ? data : []))
       .catch(() => setAdminUsers([]));
+  };
+
+  const logout = () => {
+    clearSession();
+    setMessages([]);
+    setLoaded(false);
+    skipSmooth.current = true;
+    setHistoryIds(new Set());
+    setActiveChat(null);
+    setOnlineUsers(new Set());
+    setOnlineCount(0);
+    setMyGender("");
+    setChats([]);
+    setAdminUsers([]);
+    setProfileOpen(false);
+    setAnnouncements([]);
+    applyAuth(null);
+  };
+
+  const forceLogout = (reason) => {
+    logout();
+    setAuthNotice(reason === "banned" ? "Акаунт заблоковано" : "Вас відключив адміністратор");
+  };
+
+  const ackAnnouncement = (id) => {
+    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    fetch(`${API_URL}/api/announcements/${id}/ack`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).catch(() => {});
   };
 
   const markChatRead = (convId) => {
@@ -1386,9 +1341,14 @@ export default function ChatPage() {
     if (!username) return;
     fetch(`${API_URL}/api/me`, { headers: authHeaders() })
       .then(async (res) => {
-        if (res.status === 401) {
-          clearSession();
-          applyAuth(null);
+        if (res.status === 401 || res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          if (data.error === "banned") forceLogout("banned");
+          else if (data.error === "session revoked") forceLogout("kicked");
+          else {
+            clearSession();
+            applyAuth(null);
+          }
           return null;
         }
         return res.json();
@@ -1402,6 +1362,19 @@ export default function ChatPage() {
         setMyGender(data.user.gender || "");
       })
       .catch(() => {});
+  }, [username]);
+
+  useEffect(() => {
+    if (!username) return;
+    let cancelled = false;
+    fetch(`${API_URL}/api/announcements/pending`, { headers: authHeaders() })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        setAnnouncements((prev) => mergeAnnouncements(prev, data));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [username]);
 
   useEffect(() => {
@@ -1421,6 +1394,15 @@ export default function ChatPage() {
         const data = JSON.parse(e.data);
         if (typeof data.online_count === "number") {
           setOnlineCount(data.online_count);
+        }
+        if (data.type === "force_logout") {
+          forceLogout(data.reason);
+          return;
+        }
+        if (data.type === "announcement" && data.announcement?.id) {
+          if (data.announcement.created_by === username) return;
+          setAnnouncements((prev) => mergeAnnouncements(prev, [data.announcement]));
+          return;
         }
         if (data.type === "presence_snapshot" && Array.isArray(data.online)) {
           setOnlineUsers(new Set(data.online));
@@ -1753,22 +1735,6 @@ export default function ChatPage() {
     setEmojiOpen(false);
   };
 
-  const logout = () => {
-    clearSession();
-    setMessages([]);
-    setLoaded(false);
-    skipSmooth.current = true;
-    setHistoryIds(new Set());
-    setActiveChat(null);
-    setOnlineUsers(new Set());
-    setOnlineCount(0);
-    setMyGender("");
-    setChats([]);
-    setAdminUsers([]);
-    setProfileOpen(false);
-    applyAuth(null);
-  };
-
   const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
   const peerOnlineColor = onlineColor(activeChat?.peer_gender);
   const myOnlineColor = onlineColor(myGender);
@@ -1809,12 +1775,13 @@ export default function ChatPage() {
   };
 
   if (!username) {
-    return <AuthScreen onAuth={applyAuth} />;
+    return <AuthScreen onAuth={applyAuth} notice={authNotice} />;
   }
 
   return (
     <>
       <AppStyles />
+      <AnnouncementPopup queue={announcements} onAck={ackAnnouncement} />
 
       <div style={{
         minHeight: "100vh",
@@ -1922,6 +1889,7 @@ export default function ChatPage() {
               isHead={isHead}
               adminUsers={adminUsers}
               onOpenUser={openUserFromAdmin}
+              onAdminUsersChanged={loadAdminUsers}
             />
           ) : (
             <>
