@@ -24,6 +24,8 @@ import { Avatar, NeuField } from "./ui.jsx";
 import UserCard from "./admin/UserCard.jsx";
 import StatsPanel from "./admin/StatsPanel.jsx";
 import AnnouncementsPanel from "./admin/AnnouncementsPanel.jsx";
+import FeedbackPanel from "./admin/FeedbackPanel.jsx";
+import FeedbackForm from "./FeedbackForm.jsx";
 import AnnouncementPopup from "./AnnouncementPopup.jsx";
 
 const mergeAnnouncements = (prev, incoming) => {
@@ -888,13 +890,17 @@ function AuthScreen({ onAuth, notice = "" }) {
   );
 }
 
-function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged }) {
+function ConversationsScreen({
+  onOpen, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged,
+  feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen,
+}) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
   const [listMode, setListMode] = useState("chats");
   const [cardUser, setCardUser] = useState(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     const q = query.trim();
@@ -1017,6 +1023,8 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
           <StatsPanel />
         ) : listMode === "news" ? (
           <AnnouncementsPanel />
+        ) : listMode === "feedback" ? (
+          <FeedbackPanel reloadKey={feedbackTick} onSeen={onFeedbackSeen} />
         ) : listMode === "users" ? (
           filteredAdminUsers.length === 0 ? (
             <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24 }}>
@@ -1186,6 +1194,54 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
           );
         })}
       </div>
+
+      <div style={{ textAlign: "center", padding: "2px 0 10px" }}>
+        <button
+          type="button"
+          onClick={() => {
+            if (!isHead) {
+              setFeedbackOpen(true);
+              return;
+            }
+            setListMode(listMode === "feedback" ? "chats" : "feedback");
+            setQuery("");
+            setError("");
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            border: "none",
+            background: "transparent",
+            padding: "4px 8px",
+            cursor: "pointer",
+            fontFamily: "'Nunito', sans-serif",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#b8bfca",
+          }}
+        >
+          {isHead ? (listMode === "feedback" ? "← back" : "feedbacks") : "feedback"}
+          {isHead && listMode !== "feedback" && feedbackUnread > 0 && (
+            <span style={{
+              minWidth: 15,
+              height: 15,
+              padding: "0 4px",
+              borderRadius: 50,
+              background: "#c084a0",
+              color: "#fff",
+              fontSize: 9,
+              fontWeight: 800,
+              lineHeight: "15px",
+              textAlign: "center",
+            }}>
+              {feedbackUnread > 99 ? "99+" : feedbackUnread}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} />}
     </>
   );
 }
@@ -1211,6 +1267,8 @@ export default function ChatPage() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [announcements, setAnnouncements] = useState([]);
+  const [feedbackUnread, setFeedbackUnread] = useState(0);
+  const [feedbackTick, setFeedbackTick] = useState(0);
   const [authNotice, setAuthNotice] = useState("");
   const [profileHint, setProfileHint] = useState(
     () => localStorage.getItem(PROFILE_HINT_KEY) !== "1"
@@ -1228,6 +1286,10 @@ export default function ChatPage() {
     if (!session) {
       setUsername(null);
       setRole("user");
+      setChats([]);
+      setAdminUsers([]);
+      setOnlineUsers(new Set());
+      setOnlineCount(0);
       return;
     }
     if (typeof session === "string") {
@@ -1276,13 +1338,10 @@ export default function ChatPage() {
     skipSmooth.current = true;
     setHistoryIds(new Set());
     setActiveChat(null);
-    setOnlineUsers(new Set());
-    setOnlineCount(0);
     setMyGender("");
-    setChats([]);
-    setAdminUsers([]);
     setProfileOpen(false);
     setAnnouncements([]);
+    setFeedbackUnread(0);
     applyAuth(null);
   };
 
@@ -1296,6 +1355,16 @@ export default function ChatPage() {
     fetch(`${API_URL}/api/announcements/${id}/ack`, {
       method: "POST",
       headers: authHeaders(),
+    }).catch(() => {});
+  };
+
+  const markFeedbackRead = (lastId) => {
+    setFeedbackUnread(0);
+    if (!lastId) return;
+    fetch(`${API_URL}/api/admin/feedback/read`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ last_id: lastId }),
     }).catch(() => {});
   };
 
@@ -1321,19 +1390,12 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!username) {
-      setChats([]);
-      setAdminUsers([]);
-      return;
-    }
+    if (!username) return;
     loadChats();
   }, [username]);
 
   useEffect(() => {
-    if (!username || !isHeadRole(role)) {
-      setAdminUsers([]);
-      return;
-    }
+    if (!username || !isHeadRole(role)) return;
     loadAdminUsers();
   }, [username, role]);
 
@@ -1378,11 +1440,19 @@ export default function ChatPage() {
   }, [username]);
 
   useEffect(() => {
-    if (!username) {
-      setOnlineUsers(new Set());
-      setOnlineCount(0);
-      return;
-    }
+    if (!username || !isHeadRole(role)) return;
+    let cancelled = false;
+    fetch(`${API_URL}/api/admin/feedback/unread`, { headers: authHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && typeof data?.count === "number") setFeedbackUnread(data.count);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [username, role]);
+
+  useEffect(() => {
+    if (!username) return;
 
     const token = localStorage.getItem(TOKEN_KEY);
     const ws = new WebSocket(
@@ -1402,6 +1472,11 @@ export default function ChatPage() {
         if (data.type === "announcement" && data.announcement?.id) {
           if (data.announcement.created_by === username) return;
           setAnnouncements((prev) => mergeAnnouncements(prev, [data.announcement]));
+          return;
+        }
+        if (data.type === "feedback" && data.feedback?.id) {
+          setFeedbackUnread((n) => n + 1);
+          setFeedbackTick((n) => n + 1);
           return;
         }
         if (data.type === "presence_snapshot" && Array.isArray(data.online)) {
@@ -1883,13 +1958,15 @@ export default function ChatPage() {
           {!activeChat ? (
             <ConversationsScreen
               onOpen={openChat}
-              onLogout={logout}
               onlineUsers={onlineUsers}
               chats={chats}
               isHead={isHead}
               adminUsers={adminUsers}
               onOpenUser={openUserFromAdmin}
               onAdminUsersChanged={loadAdminUsers}
+              feedbackUnread={feedbackUnread}
+              feedbackTick={feedbackTick}
+              onFeedbackSeen={markFeedbackRead}
             />
           ) : (
             <>

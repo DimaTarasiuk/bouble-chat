@@ -13,9 +13,13 @@ import (
 var (
 	ErrCannotModerate      = errors.New("cannot moderate this user")
 	ErrAnnouncementInvalid = errors.New("invalid announcement")
+	ErrFeedbackInvalid     = errors.New("invalid feedback")
 )
 
-const maxAnnouncementLen = 2000
+const (
+	maxAnnouncementLen = 2000
+	maxFeedbackLen     = 2000
+)
 
 type AdminService struct {
 	users repository.UserRepo
@@ -113,4 +117,28 @@ func (s *AdminService) PendingAnnouncements(ctx context.Context, userID int64) (
 
 func (s *AdminService) AckAnnouncement(ctx context.Context, userID, announcementID int64) error {
 	return s.admin.AckAnnouncement(ctx, userID, announcementID)
+}
+
+func (s *AdminService) CreateFeedback(ctx context.Context, userID int64, text string) (domain.Feedback, error) {
+	text = strings.TrimSpace(text)
+	if text == "" || utf8.RuneCountInString(text) > maxFeedbackLen {
+		return domain.Feedback{}, ErrFeedbackInvalid
+	}
+	return s.admin.CreateFeedback(ctx, userID, text)
+}
+
+func (s *AdminService) ListFeedback(ctx context.Context) ([]domain.Feedback, error) {
+	return s.admin.ListFeedback(ctx, 200)
+}
+
+func (s *AdminService) UnreadFeedbackCount(ctx context.Context, userID int64) (int, error) {
+	return s.admin.UnreadFeedbackCount(ctx, userID)
+}
+
+func (s *AdminService) MarkFeedbackRead(ctx context.Context, userID, lastID int64) error {
+	return s.admin.MarkFeedbackRead(ctx, userID, lastID)
+}
+
+func (s *AdminService) FeedbackReaders(ctx context.Context) ([]string, error) {
+	return s.admin.HeadUsernames(ctx)
 }

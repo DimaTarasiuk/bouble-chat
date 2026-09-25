@@ -85,6 +85,7 @@ func main() {
 		r.Patch("/api/conversations/{id}/messages/{msgId}", chatH.EditMessage)
 		r.Get("/api/announcements/pending", adminH.PendingAnnouncements)
 		r.Post("/api/announcements/{id}/ack", adminH.AckAnnouncement)
+		r.Post("/api/feedback", adminH.CreateFeedback)
 
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Use(authH.RequireRoles(domain.RoleHead))
@@ -97,6 +98,9 @@ func main() {
 			r.Get("/stats", adminH.Stats)
 			r.Get("/announcements", adminH.ListAnnouncements)
 			r.Post("/announcements", adminH.CreateAnnouncement)
+			r.Get("/feedback", adminH.ListFeedback)
+			r.Get("/feedback/unread", adminH.UnreadFeedback)
+			r.Post("/feedback/read", adminH.MarkFeedbackRead)
 		})
 	})
 

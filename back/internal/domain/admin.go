@@ -9,6 +9,13 @@ type Announcement struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type Feedback struct {
+	ID        int64     `json:"id"`
+	Username  string    `json:"username"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type PeriodCounts struct {
 	Today int `json:"today"`
 	Week  int `json:"week"`
