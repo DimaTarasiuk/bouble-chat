@@ -31,7 +31,7 @@ type ProfileUpdate struct {
 }
 
 type UserRepo interface {
-	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
+	Create(ctx context.Context, username, passwordHash, gender string) (domain.User, error)
 	GetByID(ctx context.Context, id int64) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
 	Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error)
@@ -73,12 +73,12 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	return u, nil
 }
 
-func (r *UserRepository) Create(ctx context.Context, username, passwordHash string) (domain.User, error) {
+func (r *UserRepository) Create(ctx context.Context, username, passwordHash, gender string) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
-		INSERT INTO users (username, password_hash)
-		VALUES ($1, $2)
+		INSERT INTO users (username, password_hash, gender)
+		VALUES ($1, $2, $3)
 		RETURNING `+userReturning+`
-	`, username, passwordHash))
+	`, username, passwordHash, gender))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -123,7 +123,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (do
 func (r *UserRepository) Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error) {
 	users := make([]domain.User, 0)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, username, role, created_at
+		SELECT id, username, role, gender, created_at
 		FROM users
 		WHERE username ILIKE $1
 		  AND id <> $2
@@ -137,7 +137,7 @@ func (r *UserRepository) Search(ctx context.Context, query string, excludeID int
 
 	for rows.Next() {
 		var u domain.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.Gender, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -148,7 +148,7 @@ func (r *UserRepository) Search(ctx context.Context, query string, excludeID int
 func (r *UserRepository) ListAll(ctx context.Context) ([]domain.User, error) {
 	users := make([]domain.User, 0)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, username, role, last_seen_at, created_at
+		SELECT id, username, role, gender, last_seen_at, created_at
 		FROM users
 		ORDER BY username
 	`)
@@ -159,7 +159,7 @@ func (r *UserRepository) ListAll(ctx context.Context) ([]domain.User, error) {
 
 	for rows.Next() {
 		var u domain.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.LastSeen, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.Gender, &u.LastSeen, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

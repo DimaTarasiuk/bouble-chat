@@ -17,7 +17,7 @@ type ConversationRepository struct {
 
 type ConversationRepo interface {
 	FindPair(ctx context.Context, userA, userB int64) (domain.Conversation, error)
-	Create(ctx context.Context, initiatorID, recipientID int64, peer string) (domain.Conversation, error)
+	Create(ctx context.Context, initiatorID, recipientID int64, peer, peerGender string) (domain.Conversation, error)
 	ListForUser(ctx context.Context, userID int64) ([]domain.Conversation, error)
 	GetByID(ctx context.Context, id, userID int64) (domain.Conversation, error)
 	MarkRead(ctx context.Context, conversationID, userID int64) error
@@ -36,13 +36,14 @@ func (r *ConversationRepository) FindPair(ctx context.Context, userA, userB int6
 	var c domain.Conversation
 	q := `SELECT c.id,
 				 CASE WHEN c.initiator_id = $1 THEN u_rec.username ELSE u_ini.username END,
+				 CASE WHEN c.initiator_id = $1 THEN u_rec.gender ELSE u_ini.gender END,
 				 c.created_at
 		  FROM conversations c
 		  JOIN users u_ini ON u_ini.id = c.initiator_id
 		  JOIN users u_rec ON u_rec.id = c.recipient_id
 		  WHERE LEAST(c.initiator_id, c.recipient_id) = LEAST($1::bigint, $2::bigint)
 		    AND GREATEST(c.initiator_id, c.recipient_id) = GREATEST($1::bigint, $2::bigint)`
-	err := r.db.QueryRow(ctx, q, userA, userB).Scan(&c.ID, &c.Peer, &c.CreatedAt)
+	err := r.db.QueryRow(ctx, q, userA, userB).Scan(&c.ID, &c.Peer, &c.PeerGender, &c.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Conversation{}, ErrNotFound
@@ -52,7 +53,7 @@ func (r *ConversationRepository) FindPair(ctx context.Context, userA, userB int6
 	return c, nil
 }
 
-func (r *ConversationRepository) Create(ctx context.Context, initiatorID, recipientID int64, peer string) (domain.Conversation, error) {
+func (r *ConversationRepository) Create(ctx context.Context, initiatorID, recipientID int64, peer, peerGender string) (domain.Conversation, error) {
 	var c domain.Conversation
 	q := `INSERT INTO conversations (initiator_id, recipient_id)
 		  VALUES ($1, $2)
@@ -62,6 +63,7 @@ func (r *ConversationRepository) Create(ctx context.Context, initiatorID, recipi
 		return domain.Conversation{}, err
 	}
 	c.Peer = peer
+	c.PeerGender = peerGender
 	return c, nil
 }
 
@@ -69,6 +71,7 @@ func (r *ConversationRepository) ListForUser(ctx context.Context, userID int64) 
 	list := make([]domain.Conversation, 0)
 	q := `SELECT c.id,
 				 CASE WHEN c.initiator_id = $1 THEN u_rec.username ELSE u_ini.username END,
+				 CASE WHEN c.initiator_id = $1 THEN u_rec.gender ELSE u_ini.gender END,
 				 c.created_at,
 				 (
 				   SELECT COUNT(*)::int
@@ -93,7 +96,7 @@ func (r *ConversationRepository) ListForUser(ctx context.Context, userID int64) 
 
 	for rows.Next() {
 		var c domain.Conversation
-		if err := rows.Scan(&c.ID, &c.Peer, &c.CreatedAt, &c.UnreadCount); err != nil {
+		if err := rows.Scan(&c.ID, &c.Peer, &c.PeerGender, &c.CreatedAt, &c.UnreadCount); err != nil {
 			return nil, err
 		}
 		list = append(list, c)
@@ -105,13 +108,14 @@ func (r *ConversationRepository) GetByID(ctx context.Context, id, userID int64) 
 	var c domain.Conversation
 	q := `SELECT c.id,
 				 CASE WHEN c.initiator_id = $2 THEN u_rec.username ELSE u_ini.username END,
+				 CASE WHEN c.initiator_id = $2 THEN u_rec.gender ELSE u_ini.gender END,
 				 c.created_at
 		  FROM conversations c
 		  JOIN users u_ini ON u_ini.id = c.initiator_id
 		  JOIN users u_rec ON u_rec.id = c.recipient_id
 		  WHERE c.id = $1
 		    AND (c.initiator_id = $2 OR c.recipient_id = $2)`
-	err := r.db.QueryRow(ctx, q, id, userID).Scan(&c.ID, &c.Peer, &c.CreatedAt)
+	err := r.db.QueryRow(ctx, q, id, userID).Scan(&c.ID, &c.Peer, &c.PeerGender, &c.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Conversation{}, ErrNotFound

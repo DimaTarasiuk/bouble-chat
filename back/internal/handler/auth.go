@@ -44,6 +44,7 @@ type registerRequest struct {
 	Username        string `json:"username"`
 	Password        string `json:"password"`
 	PasswordConfirm string `json:"password_confirm"`
+	Gender          string `json:"gender"`
 }
 
 type authResponse struct {
@@ -58,13 +59,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.svc.Register(r.Context(), req.Username, req.Password, req.PasswordConfirm)
+	user, token, err := h.svc.Register(r.Context(), req.Username, req.Password, req.PasswordConfirm, req.Gender)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmptyCredentials):
 			writeError(w, http.StatusBadRequest, "login and password required")
 		case errors.Is(err, service.ErrPasswordsMismatch):
 			writeError(w, http.StatusBadRequest, "passwords do not match")
+		case errors.Is(err, service.ErrGenderRequired):
+			writeError(w, http.StatusBadRequest, "gender required")
 		case errors.Is(err, service.ErrUsernameTaken):
 			writeError(w, http.StatusConflict, "username already taken")
 		default:
@@ -223,6 +226,7 @@ type adminUserResponse struct {
 	ID        int64      `json:"id"`
 	Username  string     `json:"username"`
 	Role      string     `json:"role"`
+	Gender    string     `json:"gender"`
 	Online    bool       `json:"online"`
 	LastSeen  *time.Time `json:"last_seen"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -265,6 +269,7 @@ func (h *AuthHandler) ListAllUsers(w http.ResponseWriter, r *http.Request) {
 			ID:        u.ID,
 			Username:  u.Username,
 			Role:      u.Role,
+			Gender:    u.Gender,
 			Online:    online,
 			LastSeen:  u.LastSeen,
 			CreatedAt: u.CreatedAt,

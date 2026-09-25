@@ -20,6 +20,7 @@ var (
 	ErrInvalidRole        = errors.New("invalid role")
 	ErrCannotChangeHead   = errors.New("cannot change head role")
 	ErrInvalidProfile     = errors.New("invalid profile")
+	ErrGenderRequired     = errors.New("gender required")
 )
 
 type AuthService struct {
@@ -31,13 +32,17 @@ func NewAuthService(users repository.UserRepo, secret string) *AuthService {
 	return &AuthService{users: users, secret: secret}
 }
 
-func (s *AuthService) Register(ctx context.Context, username, password, passwordConfirm string) (domain.User, string, error) {
+func (s *AuthService) Register(ctx context.Context, username, password, passwordConfirm, gender string) (domain.User, string, error) {
 	username = strings.TrimSpace(username)
+	gender = strings.TrimSpace(gender)
 	if username == "" || password == "" {
 		return domain.User{}, "", ErrEmptyCredentials
 	}
 	if password != passwordConfirm {
 		return domain.User{}, "", ErrPasswordsMismatch
+	}
+	if gender != domain.GenderMale && gender != domain.GenderFemale {
+		return domain.User{}, "", ErrGenderRequired
 	}
 
 	_, err := s.users.GetByUsername(ctx, username)
@@ -53,7 +58,7 @@ func (s *AuthService) Register(ctx context.Context, username, password, password
 		return domain.User{}, "", err
 	}
 
-	user, err := s.users.Create(ctx, username, string(hash))
+	user, err := s.users.Create(ctx, username, string(hash), gender)
 	if err != nil {
 		if errors.Is(err, repository.ErrUsernameTaken) {
 			return domain.User{}, "", ErrUsernameTaken

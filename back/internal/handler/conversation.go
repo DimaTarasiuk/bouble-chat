@@ -133,7 +133,8 @@ func (h *ConversationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 }
 
 type sendMessageRequest struct {
-	Text string `json:"text"`
+	Text    string `json:"text"`
+	ReplyTo *int64 `json:"reply_to"`
 }
 
 func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
@@ -155,13 +156,15 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	message, err := h.svc.Send(r.Context(), user.ID, user.Username, convID, req.Text)
+	message, err := h.svc.Send(r.Context(), user.ID, user.Username, convID, req.Text, req.ReplyTo)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmptyText):
 			writeError(w, http.StatusBadRequest, "text required")
 		case errors.Is(err, service.ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden")
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusBadRequest, "reply target not found")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}
