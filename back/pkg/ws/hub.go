@@ -33,27 +33,51 @@ type Client struct {
 }
 
 type Hub struct {
-	clients    map[*Client]bool
-	online     map[string]int
-	broadcast  chan envelope
-	notifyUser chan userEnvelope
-	onlineReq  chan chan []string
-	register   chan *Client
-	unregister chan *Client
-	onOffline  func(username string)
+	clients     map[*Client]bool
+	online      map[string]int
+	broadcast   chan envelope
+	notifyUser  chan userEnvelope
+	kickUser    chan userEnvelope
+	presenceAll chan []byte
+	onlineReq   chan chan []string
+	register    chan *Client
+	unregister  chan *Client
+	onOffline   func(username string)
 }
 
 func NewHub(onOffline func(username string)) *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		online:     make(map[string]int),
-		broadcast:  make(chan envelope, 100),
-		notifyUser: make(chan userEnvelope, 100),
-		onlineReq:  make(chan chan []string, 16),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		onOffline:  onOffline,
+		clients:     make(map[*Client]bool),
+		online:      make(map[string]int),
+		broadcast:   make(chan envelope, 100),
+		notifyUser:  make(chan userEnvelope, 100),
+		kickUser:    make(chan userEnvelope, 16),
+		presenceAll: make(chan []byte, 16),
+		onlineReq:   make(chan chan []string, 16),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		onOffline:   onOffline,
 	}
+}
+
+// KickUser sends a force_logout event to every socket of username and closes them.
+func (h *Hub) KickUser(username, reason string) {
+	if username == "" {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type":   "force_logout",
+		"reason": reason,
+	})
+	if err != nil {
+		return
+	}
+	h.kickUser <- userEnvelope{username: username, payload: payload}
+}
+
+// BroadcastPresence sends payload to every presence (conversation-less) socket.
+func (h *Hub) BroadcastPresence(payload []byte) {
+	h.presenceAll <- payload
 }
 
 func (h *Hub) BroadcastTo(conversationID int64, message []byte) {
@@ -115,6 +139,38 @@ func (h *Hub) Run() {
 				}
 				select {
 				case client.send <- msg.payload:
+				default:
+					stale = append(stale, client)
+				}
+			}
+			for _, client := range stale {
+				h.removeClient(client)
+			}
+
+		case msg := <-h.kickUser:
+			var targets []*Client
+			for client := range h.clients {
+				if client.username == msg.username {
+					targets = append(targets, client)
+				}
+			}
+			for _, client := range targets {
+				select {
+				case client.send <- msg.payload:
+				default:
+				}
+				// closing send lets writePump flush the event, then close the socket
+				h.removeClient(client)
+			}
+
+		case payload := <-h.presenceAll:
+			var stale []*Client
+			for client := range h.clients {
+				if client.conversationID != 0 {
+					continue
+				}
+				select {
+				case client.send <- payload:
 				default:
 					stale = append(stale, client)
 				}

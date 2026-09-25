@@ -39,6 +39,7 @@ type UserRepo interface {
 	UpdateRole(ctx context.Context, username, role string) (domain.User, error)
 	UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error)
 	TouchLastSeen(ctx context.Context, username string) error
+	GetAuthState(ctx context.Context, id int64) (domain.AuthState, error)
 }
 
 func NewUserRepository() *UserRepository {
@@ -53,7 +54,7 @@ func NewUserRepository() *UserRepository {
 	}
 }
 
-const userReturning = `id, username, role, first_name, last_name, birth_date, gender, last_seen_at, password_hash, created_at`
+const userReturning = `id, username, role, first_name, last_name, birth_date, gender, last_seen_at, banned_at, ban_reason, password_hash, created_at`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
@@ -61,6 +62,7 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	err := row.Scan(
 		&u.ID, &u.Username, &u.Role,
 		&u.FirstName, &u.LastName, &birth, &u.Gender, &u.LastSeen,
+		&u.BannedAt, &u.BanReason,
 		&u.PassHash, &u.CreatedAt,
 	)
 	if err != nil {
@@ -75,8 +77,8 @@ func scanUser(row pgx.Row) (domain.User, error) {
 
 func (r *UserRepository) Create(ctx context.Context, username, passwordHash, gender string) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
-		INSERT INTO users (username, password_hash, gender)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (username, password_hash, gender, last_announcement_id)
+		VALUES ($1, $2, $3, COALESCE((SELECT MAX(id) FROM announcements), 0))
 		RETURNING `+userReturning+`
 	`, username, passwordHash, gender))
 	if err != nil {
@@ -148,7 +150,7 @@ func (r *UserRepository) Search(ctx context.Context, query string, excludeID int
 func (r *UserRepository) ListAll(ctx context.Context) ([]domain.User, error) {
 	users := make([]domain.User, 0)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, username, role, gender, last_seen_at, created_at
+		SELECT id, username, role, gender, last_seen_at, banned_at, created_at
 		FROM users
 		ORDER BY username
 	`)
@@ -159,7 +161,7 @@ func (r *UserRepository) ListAll(ctx context.Context) ([]domain.User, error) {
 
 	for rows.Next() {
 		var u domain.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.Gender, &u.LastSeen, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.Gender, &u.LastSeen, &u.BannedAt, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -205,6 +207,22 @@ func (r *UserRepository) UpdateProfile(ctx context.Context, userID int64, patch 
 		return domain.User{}, err
 	}
 	return u, nil
+}
+
+func (r *UserRepository) GetAuthState(ctx context.Context, id int64) (domain.AuthState, error) {
+	var s domain.AuthState
+	err := r.db.QueryRow(ctx, `
+		SELECT username, role, banned_at, sessions_revoked_at
+		FROM users
+		WHERE id = $1
+	`, id).Scan(&s.Username, &s.Role, &s.BannedAt, &s.SessionsRevokedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AuthState{}, ErrNotFound
+		}
+		return domain.AuthState{}, err
+	}
+	return s, nil
 }
 
 func (r *UserRepository) TouchLastSeen(ctx context.Context, username string) error {

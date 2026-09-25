@@ -8,7 +8,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"chat.com/internal/domain"
 	"chat.com/internal/handler"
 	"chat.com/internal/repository"
 	"chat.com/internal/service"
@@ -33,12 +35,15 @@ func main() {
 	msgRepo := repository.NewMessageRepository()
 	userRepo := repository.NewUserRepository()
 	convRepo := repository.NewConversationRepository()
+	adminRepo := repository.NewAdminRepository()
 	authSvc := service.NewAuthService(userRepo, secret)
 	chatSvc := service.NewConversationService(userRepo, convRepo, msgRepo)
+	adminSvc := service.NewAdminService(userRepo, adminRepo)
 	hub := ws.NewHub(func(username string) {
 		_ = authSvc.TouchLastSeen(context.Background(), username)
 	})
 	go hub.Run()
+	go recordOnlineSnapshots(adminSvc, hub)
 
 	r := chi.NewRouter()
 	allowedOrigins := []string{"http://localhost:*"}
@@ -55,6 +60,7 @@ func main() {
 
 	authH := handler.NewAuth(authSvc, secret, hub)
 	chatH := handler.NewConversation(chatSvc, hub)
+	adminH := handler.NewAdmin(adminSvc, hub)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -77,9 +83,21 @@ func main() {
 		r.Post("/api/conversations/{id}/messages", chatH.SendMessage)
 		r.Post("/api/conversations/{id}/read", chatH.MarkRead)
 		r.Patch("/api/conversations/{id}/messages/{msgId}", chatH.EditMessage)
+		r.Get("/api/announcements/pending", adminH.PendingAnnouncements)
+		r.Post("/api/announcements/{id}/ack", adminH.AckAnnouncement)
 
-		r.Get("/api/admin/users", authH.ListAllUsers)
-		r.Post("/api/admin/users/role", authH.SetRole)
+		r.Route("/api/admin", func(r chi.Router) {
+			r.Use(authH.RequireRoles(domain.RoleHead))
+			r.Get("/users", authH.ListAllUsers)
+			r.Post("/users/role", authH.SetRole)
+			r.Get("/users/{username}", adminH.UserCard)
+			r.Post("/users/{username}/ban", adminH.Ban)
+			r.Post("/users/{username}/unban", adminH.Unban)
+			r.Post("/users/{username}/kick", adminH.Kick)
+			r.Get("/stats", adminH.Stats)
+			r.Get("/announcements", adminH.ListAnnouncements)
+			r.Post("/announcements", adminH.CreateAnnouncement)
+		})
 	})
 
 	serveFrontend(r)
@@ -95,6 +113,18 @@ func main() {
 	log.Printf("Server listening on port %s", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func recordOnlineSnapshots(svc *service.AdminService, hub *ws.Hub) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := svc.RecordOnline(ctx, len(hub.OnlineUsers())); err != nil {
+			log.Printf("online snapshot failed: %v", err)
+		}
+		cancel()
 	}
 }
 
