@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -34,7 +35,9 @@ func main() {
 	convRepo := repository.NewConversationRepository()
 	authSvc := service.NewAuthService(userRepo, secret)
 	chatSvc := service.NewConversationService(userRepo, convRepo, msgRepo)
-	hub := ws.NewHub()
+	hub := ws.NewHub(func(username string) {
+		_ = authSvc.TouchLastSeen(context.Background(), username)
+	})
 	go hub.Run()
 
 	r := chi.NewRouter()
@@ -50,7 +53,7 @@ func main() {
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}))
 
-	authH := handler.NewAuth(authSvc, secret)
+	authH := handler.NewAuth(authSvc, secret, hub)
 	chatH := handler.NewConversation(chatSvc, hub)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -75,6 +78,7 @@ func main() {
 		r.Post("/api/conversations/{id}/read", chatH.MarkRead)
 		r.Patch("/api/conversations/{id}/messages/{msgId}", chatH.EditMessage)
 
+		r.Get("/api/admin/users", authH.ListAllUsers)
 		r.Post("/api/admin/users/role", authH.SetRole)
 	})
 
