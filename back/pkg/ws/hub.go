@@ -116,9 +116,11 @@ func (h *Hub) onlineList() []string {
 }
 
 func (h *Hub) sendSnapshot(client *Client) {
+	list := h.onlineList()
 	payload, err := json.Marshal(map[string]any{
-		"type":   "presence_snapshot",
-		"online": h.onlineList(),
+		"type":         "presence_snapshot",
+		"online":       list,
+		"online_count": len(list),
 	})
 	if err != nil {
 		return
@@ -130,10 +132,12 @@ func (h *Hub) sendSnapshot(client *Client) {
 }
 
 func (h *Hub) fanoutPresence(username string, online bool) {
+	list := h.onlineList()
 	payload, err := json.Marshal(map[string]any{
-		"type":   "presence",
-		"user":   username,
-		"online": online,
+		"type":         "presence",
+		"user":         username,
+		"online":       online,
+		"online_count": len(list),
 	})
 	if err != nil {
 		return

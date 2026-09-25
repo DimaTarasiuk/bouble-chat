@@ -12,10 +12,12 @@ import (
 )
 
 var (
-	ErrEmptyCredentials    = errors.New("login and password required")
-	ErrPasswordsMismatch   = errors.New("passwords do not match")
-	ErrUsernameTaken       = errors.New("username already taken")
-	ErrInvalidCredentials  = errors.New("invalid credentials")
+	ErrEmptyCredentials   = errors.New("login and password required")
+	ErrPasswordsMismatch  = errors.New("passwords do not match")
+	ErrUsernameTaken      = errors.New("username already taken")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInvalidRole        = errors.New("invalid role")
+	ErrCannotChangeHead   = errors.New("cannot change head role")
 )
 
 type AuthService struct {
@@ -57,7 +59,7 @@ func (s *AuthService) Register(ctx context.Context, username, password, password
 		return domain.User{}, "", err
 	}
 
-	token, err := jwtpkg.GenerateToken(user.ID, user.Username, s.secret)
+	token, err := jwtpkg.GenerateToken(user.ID, user.Username, user.Role, s.secret)
 	if err != nil {
 		return domain.User{}, "", err
 	}
@@ -83,10 +85,40 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (dom
 		return domain.User{}, "", ErrInvalidCredentials
 	}
 
-	token, err := jwtpkg.GenerateToken(user.ID, user.Username, s.secret)
+	token, err := jwtpkg.GenerateToken(user.ID, user.Username, user.Role, s.secret)
 	if err != nil {
 		return domain.User{}, "", err
 	}
 
 	return user, token, nil
+}
+
+func (s *AuthService) Me(ctx context.Context, userID int64) (domain.User, error) {
+	return s.users.GetByID(ctx, userID)
+}
+
+func (s *AuthService) SetRole(ctx context.Context, actorRole, targetUsername, newRole string) (domain.User, error) {
+	if actorRole != domain.RoleHead {
+		return domain.User{}, ErrForbidden
+	}
+
+	newRole = strings.TrimSpace(newRole)
+	if newRole != domain.RoleUser && newRole != domain.RoleAdmin {
+		return domain.User{}, ErrInvalidRole
+	}
+
+	targetUsername = strings.TrimSpace(targetUsername)
+	if targetUsername == "" {
+		return domain.User{}, ErrInvalidRole
+	}
+
+	target, err := s.users.GetByUsername(ctx, targetUsername)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if target.Role == domain.RoleHead {
+		return domain.User{}, ErrCannotChangeHead
+	}
+
+	return s.users.UpdateRole(ctx, targetUsername, newRole)
 }
