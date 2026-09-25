@@ -27,6 +27,14 @@ const clearSession = () => {
   localStorage.removeItem(ROLE_KEY);
 };
 
+const ONLINE_OFF = "#c5cad3";
+const ONLINE_OFF_TEXT = "#9ca3af";
+const onlineColor = (gender) => {
+  if (gender === "male") return "#60a5fa";
+  if (gender === "female") return "#f9a8d4";
+  return "#86efac";
+};
+
 const createNotificationSound = () => {
   const audio = new Audio(notificationMp3);
   audio.preload = "auto";
@@ -152,11 +160,15 @@ function canEditMessage(msg, username) {
   return Date.now() - created <= EDIT_WINDOW_MS;
 }
 
-function Bubble({ msg, username, animate = false, onEdit }) {
+function Bubble({ msg, username, animate = false, onEdit, onReply }) {
   const isMe = msg.from === username;
+  const canReply = !isMe && typeof onReply === "function";
   const initials = (msg.from || "?").slice(0, 2).toUpperCase();
   const longPressRef = useRef(null);
-  const movedRef = useRef(false);
+  const startRef = useRef({ x: 0, y: 0, dragging: false, replied: false, pointerId: null, active: false });
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragXRef = useRef(0);
 
   const clearLongPress = () => {
     if (longPressRef.current) {
@@ -165,32 +177,116 @@ function Bubble({ msg, username, animate = false, onEdit }) {
     }
   };
 
-  const onPointerDown = (e) => {
-    if (!isMe || !onEdit || !canEditMessage(msg, username)) return;
-    if (e.button != null && e.button !== 0) return;
-    movedRef.current = false;
-    clearLongPress();
-    longPressRef.current = setTimeout(() => {
-      longPressRef.current = null;
-      haptic(18);
-      onEdit(msg);
-    }, 480);
+  const resetDrag = () => {
+    startRef.current.dragging = false;
+    startRef.current.replied = false;
+    startRef.current.active = false;
+    startRef.current.pointerId = null;
+    dragXRef.current = 0;
+    setDragX(0);
+    setDragging(false);
   };
 
-  const onPointerMove = (e) => {
-    if (!longPressRef.current) return;
-    // cancel if finger slides
-    if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) {
-      movedRef.current = true;
-      clearLongPress();
+  const snapBack = () => {
+    startRef.current.dragging = false;
+    dragXRef.current = 0;
+    setDragX(0);
+    setDragging(false);
+  };
+
+  const onPointerDown = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    // Own messages: capture for long-press edit only. Reply capture starts on confirmed drag.
+    if (isMe) {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }
+    startRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      dragging: false,
+      replied: false,
+      pointerId: e.pointerId,
+      active: true,
+    };
+    dragXRef.current = 0;
+    setDragX(0);
+    setDragging(false);
+    clearLongPress();
+    if (isMe && onEdit && canEditMessage(msg, username)) {
+      longPressRef.current = setTimeout(() => {
+        longPressRef.current = null;
+        if (startRef.current.dragging || startRef.current.replied) return;
+        haptic(18);
+        onEdit(msg);
+      }, 480);
     }
   };
 
-  const onPointerUp = () => clearLongPress();
-  const onPointerCancel = () => clearLongPress();
+  const onPointerMove = (e) => {
+    const start = startRef.current;
+    if (!start.active || start.replied || !canReply) return;
+    // Ignore hover / move without primary button (mouse false triggers)
+    if (e.pointerType === "mouse" && (e.buttons & 1) !== 1) return;
+
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+
+    if (!start.dragging) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        clearLongPress();
+      }
+      // only start reply-drag when clearly horizontal right swipe
+      if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        start.dragging = true;
+        setDragging(true);
+        clearLongPress();
+        try {
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        } catch {
+          // ignore
+        }
+      } else {
+        return;
+      }
+    }
+
+    e.preventDefault?.();
+    const next = Math.max(0, Math.min(72, dx));
+    dragXRef.current = next;
+    setDragX(next);
+    if (next >= 56 && start.dragging) {
+      start.replied = true;
+      haptic(16);
+      snapBack();
+      onReply(msg);
+    }
+  };
+
+  const onPointerUp = (e) => {
+    clearLongPress();
+    try {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    } catch {
+      // ignore
+    }
+    resetDrag();
+  };
+
+  const onPointerCancel = () => {
+    clearLongPress();
+    resetDrag();
+  };
+
+  const onLostPointerCapture = () => {
+    clearLongPress();
+    resetDrag();
+  };
+
   const onContextMenu = (e) => {
     if (isMe && canEditMessage(msg, username)) e.preventDefault();
   };
+
+  const replyPreview = msg.reply_to;
 
   return (
     <div style={{
@@ -199,11 +295,21 @@ function Bubble({ msg, username, animate = false, onEdit }) {
       alignItems: "flex-end",
       gap: 10,
       marginBottom: 16,
+      position: "relative",
       ...(animate ? { animation: "fadeUp 0.25s ease both" } : {}),
     }}>
       {!isMe && <Avatar initials={initials} color="#c084a0" />}
 
-      <div style={{ maxWidth: "68%", display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+      <div
+        style={{
+        maxWidth: "68%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isMe ? "flex-end" : "flex-start",
+        transform: canReply ? `translateX(${dragX}px)` : undefined,
+        transition: canReply && !dragging ? "transform 0.18s ease" : "none",
+        willChange: canReply ? "transform" : undefined,
+      }}>
         {!isMe && (
           <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, marginBottom: 3, paddingLeft: 4 }}>
             {msg.from}
@@ -211,10 +317,10 @@ function Bubble({ msg, username, animate = false, onEdit }) {
         )}
         <div
           onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
+          onPointerMove={canReply || isMe ? onPointerMove : undefined}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
-          onPointerLeave={onPointerUp}
+          onLostPointerCapture={onLostPointerCapture}
           onContextMenu={onContextMenu}
           style={{
             padding: "11px 16px",
@@ -228,12 +334,38 @@ function Bubble({ msg, username, animate = false, onEdit }) {
             color: "#4b5563",
             lineHeight: 1.5,
             fontFamily: "'Nunito', sans-serif",
-            touchAction: "manipulation",
-            userSelect: isMe ? "none" : "auto",
-            WebkitUserSelect: isMe ? "none" : "auto",
-            cursor: isMe && canEditMessage(msg, username) ? "pointer" : "default",
+            touchAction: canReply ? "pan-y" : "auto",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            cursor: isMe && canEditMessage(msg, username) ? "pointer" : (canReply ? "grab" : "default"),
+            maxWidth: "100%",
           }}
         >
+          {replyPreview && (
+            <div style={{
+              marginBottom: 8,
+              padding: "6px 10px",
+              borderRadius: 10,
+              borderLeft: "3px solid #c084a0",
+              background: isMe ? "rgba(192,132,160,0.12)" : "rgba(255,255,255,0.55)",
+              fontSize: 12,
+              lineHeight: 1.35,
+            }}>
+              <div style={{ fontWeight: 800, color: "#c084a0", marginBottom: 2 }}>
+                {replyPreview.from}
+              </div>
+              <div style={{
+                fontWeight: 600,
+                color: "#6b7280",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 180,
+              }}>
+                {replyPreview.text}
+              </div>
+            </div>
+          )}
           {msg.text}
         </div>
         <span style={{
@@ -622,6 +754,7 @@ function AuthScreen({ onAuth }) {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [gender, setGender] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -631,6 +764,7 @@ function AuthScreen({ onAuth }) {
     setMode(next);
     setError("");
     setPassword2("");
+    setGender("");
   };
 
   const saveSession = (data) => {
@@ -650,6 +784,10 @@ function AuthScreen({ onAuth }) {
       setError("Паролі не співпадають");
       return;
     }
+    if (isRegister && gender !== "male" && gender !== "female") {
+      setError("Оберіть стать");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -658,7 +796,7 @@ function AuthScreen({ onAuth }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(isRegister
-          ? { username, password, password_confirm: password2 }
+          ? { username, password, password_confirm: password2, gender }
           : { username, password }
         ),
       });
@@ -667,6 +805,7 @@ function AuthScreen({ onAuth }) {
         const messages = {
           "login and password required": "Заповніть логін і пароль",
           "passwords do not match": "Паролі не співпадають",
+          "gender required": "Оберіть стать",
           "username already taken": "Такий логін уже зайнятий",
           "invalid credentials": "Невірний логін або пароль",
         };
@@ -736,13 +875,46 @@ function AuthScreen({ onAuth }) {
           placeholder="Пароль"
         />
         {isRegister && (
-          <NeuField
-            type="password"
-            value={password2}
-            onChange={e => setPassword2(e.target.value)}
-            onKey={onKey}
-            placeholder="Пароль ще раз"
-          />
+          <>
+            <NeuField
+              type="password"
+              value={password2}
+              onChange={e => setPassword2(e.target.value)}
+              onKey={onKey}
+              placeholder="Пароль ще раз"
+            />
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 }}>Стать</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {GENDER_OPTIONS.map((opt) => {
+                  const active = gender === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="neu-press"
+                      onClick={() => setGender(opt.value)}
+                      style={{
+                        flex: 1,
+                        padding: "12px 0",
+                        border: "none",
+                        borderRadius: 50,
+                        background: NEU_BG,
+                        boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
+                        cursor: "pointer",
+                        fontFamily: "'Nunito', sans-serif",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: active ? "#6b8fb5" : "#9ca3af",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
 
         {error && (
@@ -830,7 +1002,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
           : "Не вдалося відкрити чат");
         return;
       }
-      onOpen({ id: data.id, peer: data.peer, unread_count: data.unread_count || 0 });
+      onOpen({ id: data.id, peer: data.peer, peer_gender: data.peer_gender || "", unread_count: data.unread_count || 0 });
     } catch {
       setError("Не вдалося відкрити чат");
     }
@@ -914,6 +1086,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
             </div>
           ) : filteredAdminUsers.map((u) => {
             const isOnline = !!u.online || online.has(u.username);
+            const onCol = onlineColor(u.gender);
             return (
               <button
                 key={u.id}
@@ -940,7 +1113,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                   <div style={{
                     position: "absolute", bottom: 0, right: 0,
                     width: 9, height: 9, borderRadius: "50%",
-                    background: isOnline ? "#86efac" : "#c5cad3",
+                    background: isOnline ? onCol : ONLINE_OFF,
                     boxShadow: `0 0 0 2px ${NEU_BG}`,
                   }}/>
                 </div>
@@ -951,7 +1124,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                       <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}> · {u.role}</span>
                     ) : null}
                   </div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
                     {isOnline ? "● Online" : formatLastSeen(u.last_seen)}
                   </div>
                 </div>
@@ -965,6 +1138,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
             </div>
           ) : results.map(u => {
             const isOnline = online.has(u.username);
+            const onCol = onlineColor(u.gender);
             return (
             <button
               key={u.id}
@@ -991,13 +1165,13 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
                 <div style={{
                   position: "absolute", bottom: 0, right: 0,
                   width: 9, height: 9, borderRadius: "50%",
-                  background: isOnline ? "#86efac" : "#c5cad3",
+                  background: isOnline ? onCol : ONLINE_OFF,
                   boxShadow: `0 0 0 2px ${NEU_BG}`,
                 }}/>
               </div>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{u.username}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
                   {isOnline ? "● Online" : "Offline"}
                 </div>
               </div>
@@ -1010,12 +1184,13 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
           </div>
         ) : chats.map(c => {
           const isOnline = online.has(c.peer);
+          const onCol = onlineColor(c.peer_gender);
           const unread = Number(c.unread_count) || 0;
           return (
           <button
             key={c.id}
             className="neu-press"
-            onClick={() => onOpen({ id: c.id, peer: c.peer })}
+            onClick={() => onOpen({ id: c.id, peer: c.peer, peer_gender: c.peer_gender || "" })}
             style={{
               width: "100%",
               display: "flex",
@@ -1037,13 +1212,13 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats, isHead, adm
               <div style={{
                 position: "absolute", bottom: 0, right: 0,
                 width: 9, height: 9, borderRadius: "50%",
-                background: isOnline ? "#86efac" : "#c5cad3",
+                background: isOnline ? onCol : ONLINE_OFF,
                 boxShadow: `0 0 0 2px ${NEU_BG}`,
               }}/>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
                 {isOnline ? "● Online" : "Offline"}
               </div>
             </div>
@@ -1085,9 +1260,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [editingId, setEditingId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
+  const [myGender, setMyGender] = useState("");
   const [chats, setChats] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1200,6 +1377,7 @@ export default function ChatPage() {
         localStorage.setItem(USER_KEY, data.user.username);
         localStorage.setItem(ROLE_KEY, data.user.role || "user");
         setRole(data.user.role || "user");
+        setMyGender(data.user.gender || "");
       })
       .catch(() => {});
   }, [username]);
@@ -1367,10 +1545,25 @@ export default function ChatPage() {
     setInput("");
   };
 
+  const cancelReply = () => setReplyTo(null);
+
   const startEdit = (msg) => {
     if (!canEditMessage(msg, username)) return;
+    setReplyTo(null);
     setEditingId(msg.id);
     setInput(msg.text || "");
+  };
+
+  const startReply = (msg) => {
+    if (!msg || typeof msg.id !== "number") return;
+    // Reply only to the interlocutor's messages, never your own
+    if (msg.from === username) return;
+    setEditingId(null);
+    setReplyTo({
+      id: msg.id,
+      from: msg.from,
+      text: msg.text || "",
+    });
   };
 
   const send = async () => {
@@ -1403,22 +1596,34 @@ export default function ChatPage() {
       return;
     }
 
+    const replyTarget = replyTo;
     const tempId = "temp-" + Date.now();
     const tempMessage = {
       id: tempId,
       from: username,
       text,
       time: new Date().toISOString(),
+      ...(replyTarget ? {
+        reply_to: {
+          id: replyTarget.id,
+          from: replyTarget.from,
+          text: replyTarget.text,
+        },
+      } : {}),
     };
 
     setMessages(prev => [...prev, tempMessage]);
     setInput("");
+    setReplyTo(null);
 
     try {
       const res = await fetch(`${API_URL}/api/conversations/${activeChat.id}/messages`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ text })
+        body: JSON.stringify({
+          text,
+          ...(replyTarget ? { reply_to: replyTarget.id } : {}),
+        })
       });
       if (res.status === 401) {
         clearSession();
@@ -1430,7 +1635,6 @@ export default function ChatPage() {
         setMessages(prev => prev.filter(m => m.id !== tempId));
         return;
       }
-      // замінюємо temp на збережене повідомлення з реальним id
       setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
     } catch (err) {
       console.error("Помилка відправки:", err);
@@ -1439,10 +1643,17 @@ export default function ChatPage() {
   };
 
   const onKey = (e) => {
-    if (e.key === "Escape" && editingId != null) {
-      e.preventDefault();
-      cancelEdit();
-      return;
+    if (e.key === "Escape") {
+      if (editingId != null) {
+        e.preventDefault();
+        cancelEdit();
+        return;
+      }
+      if (replyTo) {
+        e.preventDefault();
+        cancelReply();
+        return;
+      }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
@@ -1454,13 +1665,21 @@ export default function ChatPage() {
     setLoaded(false);
     setInput("");
     setEditingId(null);
+    setReplyTo(null);
     setActiveChat(chat);
     setChats(prev => {
       const exists = prev.some(c => c.id === chat.id);
       if (exists) {
-        return prev.map(c => c.id === chat.id ? { ...c, unread_count: 0 } : c);
+        return prev.map(c => c.id === chat.id
+          ? { ...c, unread_count: 0, peer_gender: chat.peer_gender ?? c.peer_gender }
+          : c);
       }
-      return [{ id: chat.id, peer: chat.peer, unread_count: 0 }, ...prev];
+      return [{
+        id: chat.id,
+        peer: chat.peer,
+        peer_gender: chat.peer_gender || "",
+        unread_count: 0,
+      }, ...prev];
     });
     markChatRead(chat.id);
   };
@@ -1473,6 +1692,7 @@ export default function ChatPage() {
     setHistoryIds(new Set());
     setInput("");
     setEditingId(null);
+    setReplyTo(null);
   };
 
   const logout = () => {
@@ -1484,6 +1704,7 @@ export default function ChatPage() {
     setActiveChat(null);
     setOnlineUsers(new Set());
     setOnlineCount(0);
+    setMyGender("");
     setChats([]);
     setAdminUsers([]);
     setProfileOpen(false);
@@ -1491,6 +1712,8 @@ export default function ChatPage() {
   };
 
   const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
+  const peerOnlineColor = onlineColor(activeChat?.peer_gender);
+  const myOnlineColor = onlineColor(myGender);
   const showOnlineStats = isStaffRole(role);
   const isHead = isHeadRole(role);
   const headerInitials = (username || "?").slice(0, 2).toUpperCase();
@@ -1504,7 +1727,7 @@ export default function ChatPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return;
-      openChat({ id: data.id, peer: data.peer });
+      openChat({ id: data.id, peer: data.peer, peer_gender: data.peer_gender || "" });
     } catch {
       // ignore
     }
@@ -1524,6 +1747,7 @@ export default function ChatPage() {
 
   const onProfileSaved = (user) => {
     applyAuth({ username: user.username, role: user.role || "user" });
+    setMyGender(user.gender || "");
   };
 
   if (!username) {
@@ -1588,7 +1812,7 @@ export default function ChatPage() {
                 <span style={{
                   position: "absolute", bottom: 1, right: 1,
                   width: 10, height: 10, borderRadius: "50%",
-                  background: onlineUsers.has(username) ? "#86efac" : "#c5cad3",
+                  background: onlineUsers.has(username) ? myOnlineColor : ONLINE_OFF,
                   boxShadow: `0 0 0 2px ${NEU_BG}`,
                 }}/>
               </button>
@@ -1600,7 +1824,7 @@ export default function ChatPage() {
               <div style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: activeChat ? (peerOnline ? "#86efac" : "#9ca3af") : "#9ca3af",
+                color: activeChat ? (peerOnline ? peerOnlineColor : ONLINE_OFF_TEXT) : "#9ca3af",
               }}>
                 {activeChat
                   ? (peerOnline ? "● Online" : "Offline")
@@ -1668,6 +1892,7 @@ export default function ChatPage() {
                 username={username}
                 animate={!historyIds.has(msg.id)}
                 onEdit={startEdit}
+                onReply={startReply}
               />
             ))}
             <div ref={bottomRef} />
@@ -1691,6 +1916,38 @@ export default function ChatPage() {
                 >Скасувати</button>
               </div>
             )}
+            {replyTo && editingId == null && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "8px 12px",
+                borderRadius: 16,
+                background: NEU_BG,
+                boxShadow: neu(true, 2, 5),
+              }}>
+                <div style={{
+                  width: 3, alignSelf: "stretch", borderRadius: 2, background: "#c084a0", flexShrink: 0,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#c084a0" }}>
+                    Відповідь · {replyTo.from}
+                  </div>
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: "#6b7280",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {replyTo.text}
+                  </div>
+                </div>
+                <button
+                  className="neu-press-soft"
+                  onClick={cancelReply}
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer",
+                    fontFamily: "'Nunito', sans-serif", fontSize: 12, fontWeight: 700, color: "#9ca3af",
+                  }}
+                >✕</button>
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               flex: 1, display: "flex", alignItems: "center",
@@ -1701,7 +1958,11 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
-                placeholder={editingId != null ? "Змінити повідомлення..." : "Написати повідомлення..."}
+                placeholder={
+                  editingId != null
+                    ? "Змінити повідомлення..."
+                    : (replyTo ? "Написати відповідь..." : "Написати повідомлення...")
+                }
                 style={{
                   flex: 1, border: "none", outline: "none",
                   background: "transparent",

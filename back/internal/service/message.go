@@ -25,5 +25,5 @@ func (s *MessageService) GetByConversation(ctx context.Context, conversationID i
 }
 
 func (s *MessageService) Create(ctx context.Context, conversationID int64, from string, text string) (domain.Message, error) {
-	return s.repo.Create(ctx, conversationID, from, text)
+	return s.repo.Create(ctx, conversationID, from, text, nil)
 }

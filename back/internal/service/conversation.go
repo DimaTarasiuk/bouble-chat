@@ -65,7 +65,7 @@ func (s *ConversationService) FindOrCreate(ctx context.Context, userID int64, pe
 		return domain.Conversation{}, err
 	}
 
-	created, err := s.convs.Create(ctx, userID, peer.ID, peer.Username)
+	created, err := s.convs.Create(ctx, userID, peer.ID, peer.Username, peer.Gender)
 	if err != nil {
 		existing, findErr := s.convs.FindPair(ctx, userID, peer.ID)
 		if findErr == nil {
@@ -106,7 +106,7 @@ func (s *ConversationService) MarkRead(ctx context.Context, userID, convID int64
 	return s.convs.MarkRead(ctx, convID, userID)
 }
 
-func (s *ConversationService) Send(ctx context.Context, userID int64, username string, convID int64, text string) (domain.Message, error) {
+func (s *ConversationService) Send(ctx context.Context, userID int64, username string, convID int64, text string, replyToID *int64) (domain.Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return domain.Message{}, ErrEmptyText
@@ -114,7 +114,20 @@ func (s *ConversationService) Send(ctx context.Context, userID int64, username s
 	if _, err := s.Get(ctx, userID, convID); err != nil {
 		return domain.Message{}, err
 	}
-	return s.msgs.Create(ctx, convID, username, text)
+	if replyToID != nil {
+		reply, replyConvID, err := s.msgs.GetByID(ctx, *replyToID)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		if replyConvID != convID {
+			return domain.Message{}, ErrForbidden
+		}
+		// Reply only to the other person's messages
+		if reply.From == username {
+			return domain.Message{}, ErrForbidden
+		}
+	}
+	return s.msgs.Create(ctx, convID, username, text, replyToID)
 }
 
 func (s *ConversationService) EditMessage(ctx context.Context, userID int64, username string, convID, msgID int64, text string) (domain.Message, error) {
