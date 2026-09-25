@@ -16,12 +16,12 @@ type AdminRepository struct {
 }
 
 type AdminRepo interface {
-	UserCounts(ctx context.Context, userID int64, username string) (chats int, messages int, err error)
+	UserCounts(ctx context.Context, userID int64) (chats int, messages int, err error)
 	Ban(ctx context.Context, userID int64, reason string) error
 	Unban(ctx context.Context, userID int64) error
 	RevokeSessions(ctx context.Context, userID int64) error
 
-	Stats(ctx context.Context, onlineUsers []string) (domain.Stats, error)
+	Stats(ctx context.Context, onlineUserIDs []int64) (domain.Stats, error)
 	InsertOnlineSnapshot(ctx context.Context, count int) error
 
 	CreateAnnouncement(ctx context.Context, createdBy int64, text string) (domain.Announcement, error)
@@ -33,7 +33,7 @@ type AdminRepo interface {
 	ListFeedback(ctx context.Context, limit int) ([]domain.Feedback, error)
 	UnreadFeedbackCount(ctx context.Context, userID int64) (int, error)
 	MarkFeedbackRead(ctx context.Context, userID, lastID int64) error
-	HeadUsernames(ctx context.Context) ([]string, error)
+	HeadIDs(ctx context.Context) ([]int64, error)
 }
 
 func NewAdminRepository() *AdminRepository {
@@ -45,13 +45,17 @@ func NewAdminRepository() *AdminRepository {
 	return &AdminRepository{db: pool}
 }
 
-func (r *AdminRepository) UserCounts(ctx context.Context, userID int64, username string) (int, int, error) {
+func (r *AdminRepository) Close() {
+	r.db.Close()
+}
+
+func (r *AdminRepository) UserCounts(ctx context.Context, userID int64) (int, int, error) {
 	var chats, messages int
 	err := r.db.QueryRow(ctx, `
 		SELECT
 		  (SELECT COUNT(*)::int FROM conversations WHERE initiator_id = $1 OR recipient_id = $1),
-		  (SELECT COUNT(*)::int FROM messages WHERE username = $2)
-	`, userID, username).Scan(&chats, &messages)
+		  (SELECT COUNT(*)::int FROM messages WHERE user_id = $1)
+	`, userID).Scan(&chats, &messages)
 	return chats, messages, err
 }
 
@@ -100,11 +104,11 @@ func (r *AdminRepository) RevokeSessions(ctx context.Context, userID int64) erro
 
 const todayStartSQL = `(date_trunc('day', NOW() AT TIME ZONE 'Europe/Kyiv') AT TIME ZONE 'Europe/Kyiv')`
 
-func (r *AdminRepository) Stats(ctx context.Context, onlineUsers []string) (domain.Stats, error) {
+func (r *AdminRepository) Stats(ctx context.Context, onlineUserIDs []int64) (domain.Stats, error) {
 	var s domain.Stats
-	s.OnlineNow = len(onlineUsers)
-	if onlineUsers == nil {
-		onlineUsers = []string{}
+	s.OnlineNow = len(onlineUserIDs)
+	if onlineUserIDs == nil {
+		onlineUserIDs = []int64{}
 	}
 
 	err := r.db.QueryRow(ctx, `
@@ -113,9 +117,9 @@ func (r *AdminRepository) Stats(ctx context.Context, onlineUsers []string) (doma
 		  COUNT(*) FILTER (WHERE created_at >= `+todayStartSQL+`)::int,
 		  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int,
 		  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int,
-		  COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '24 hours' OR username = ANY($1))::int
+		  COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '24 hours' OR id = ANY($1))::int
 		FROM users
-	`, onlineUsers).Scan(
+	`, onlineUserIDs).Scan(
 		&s.TotalUsers,
 		&s.Registrations.Today, &s.Registrations.Week, &s.Registrations.Month,
 		&s.DAU,
@@ -138,11 +142,12 @@ func (r *AdminRepository) Stats(ctx context.Context, onlineUsers []string) (doma
 
 	s.TopUsers = make([]domain.TopUser, 0)
 	rows, err := r.db.Query(ctx, `
-		SELECT username, COUNT(*)::int
-		FROM messages
-		WHERE created_at >= NOW() - INTERVAL '7 days'
-		GROUP BY username
-		ORDER BY 2 DESC, username
+		SELECT u.username, COUNT(*)::int
+		FROM messages m
+		JOIN users u ON u.id = m.user_id
+		WHERE m.created_at >= NOW() - INTERVAL '7 days'
+		GROUP BY u.id, u.username
+		ORDER BY 2 DESC, u.username
 		LIMIT 10
 	`)
 	if err != nil {
@@ -330,19 +335,19 @@ func (r *AdminRepository) MarkFeedbackRead(ctx context.Context, userID, lastID i
 	return err
 }
 
-func (r *AdminRepository) HeadUsernames(ctx context.Context) ([]string, error) {
-	rows, err := r.db.Query(ctx, `SELECT username FROM users WHERE role = $1`, domain.RoleHead)
+func (r *AdminRepository) HeadIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.Query(ctx, `SELECT id FROM users WHERE role = $1`, domain.RoleHead)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var names []string
+	var ids []int64
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		names = append(names, name)
+		ids = append(ids, id)
 	}
-	return names, rows.Err()
+	return ids, rows.Err()
 }

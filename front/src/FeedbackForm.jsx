@@ -23,7 +23,7 @@ export default function FeedbackForm({ onClose }) {
         body: JSON.stringify({ text: text.trim() }),
       });
       if (!res.ok) {
-        setError("Не вдалося надіслати");
+        setError(res.status === 429 ? "Забагато відгуків, спробуйте пізніше" : "Не вдалося надіслати");
         return;
       }
       setSent(true);

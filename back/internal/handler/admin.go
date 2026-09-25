@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"slices"
 	"strconv"
 
 	"chat.com/internal/domain"
@@ -25,11 +23,8 @@ func NewAdmin(svc *service.AdminService, hub *ws.Hub) *AdminHandler {
 	return &AdminHandler{svc: svc, hub: hub}
 }
 
-func (h *AdminHandler) isOnline(username string) bool {
-	if h.hub == nil {
-		return false
-	}
-	return slices.Contains(h.hub.OnlineUsers(), username)
+func (h *AdminHandler) isOnline(userID int64) bool {
+	return h.hub != nil && h.hub.IsOnline(userID)
 }
 
 func writeModerationError(w http.ResponseWriter, err error) {
@@ -44,12 +39,12 @@ func writeModerationError(w http.ResponseWriter, err error) {
 }
 
 func (h *AdminHandler) UserCard(w http.ResponseWriter, r *http.Request) {
-	username := chi.URLParam(r, "username")
-	card, err := h.svc.UserCard(r.Context(), username, h.isOnline(username))
+	card, err := h.svc.UserCard(r.Context(), chi.URLParam(r, "username"))
 	if err != nil {
 		writeModerationError(w, err)
 		return
 	}
+	card.Online = h.isOnline(card.ID)
 	writeJSON(w, http.StatusOK, card)
 }
 
@@ -60,8 +55,7 @@ type banRequest struct {
 func (h *AdminHandler) Ban(w http.ResponseWriter, r *http.Request) {
 	actor, _ := UserFromContext(r.Context())
 	var req banRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeOptionalJSON(w, r, &req) {
 		return
 	}
 
@@ -71,7 +65,7 @@ func (h *AdminHandler) Ban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.hub != nil {
-		h.hub.KickUser(user.Username, "banned")
+		h.hub.KickUser(user.ID, "banned")
 	}
 	writeJSON(w, http.StatusOK, user)
 }
@@ -94,15 +88,15 @@ func (h *AdminHandler) Kick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.hub != nil {
-		h.hub.KickUser(user.Username, "kicked")
+		h.hub.KickUser(user.ID, "kicked")
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
-	var online []string
+	var online []int64
 	if h.hub != nil {
-		online = h.hub.OnlineUsers()
+		online = h.hub.OnlineUserIDs()
 	}
 	stats, err := h.svc.Stats(r.Context(), online)
 	if err != nil {
@@ -119,8 +113,7 @@ type announcementRequest struct {
 func (h *AdminHandler) CreateAnnouncement(w http.ResponseWriter, r *http.Request) {
 	actor, _ := UserFromContext(r.Context())
 	var req announcementRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -189,8 +182,7 @@ type feedbackRequest struct {
 func (h *AdminHandler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 	user, _ := UserFromContext(r.Context())
 	var req feedbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	f, err := h.svc.CreateFeedback(r.Context(), user.ID, req.Text)
@@ -232,7 +224,10 @@ type feedbackReadRequest struct {
 func (h *AdminHandler) MarkFeedbackRead(w http.ResponseWriter, r *http.Request) {
 	user, _ := UserFromContext(r.Context())
 	var req feedbackReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LastID <= 0 {
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.LastID <= 0 {
 		writeError(w, http.StatusBadRequest, "bad request")
 		return
 	}
@@ -255,7 +250,7 @@ func (h *AdminHandler) notifyFeedback(ctx context.Context, f domain.Feedback) {
 	if err != nil {
 		return
 	}
-	for _, name := range readers {
-		h.hub.NotifyUser(name, payload)
+	for _, id := range readers {
+		h.hub.NotifyUser(id, payload)
 	}
 }

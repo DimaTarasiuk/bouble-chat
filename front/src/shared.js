@@ -18,6 +18,15 @@ export const authHeaders = () => {
   };
 };
 
+export const MIN_PASSWORD_LEN = 6;
+export const MAX_MESSAGE_LEN = 1000;
+export const MESSAGES_PAGE_SIZE = 50;
+
+export const openSocket = (path) => {
+  const token = localStorage.getItem(TOKEN_KEY) || "";
+  return new WebSocket(`${API_URL.replace(/^http/, "ws")}${path}`, ["bearer", token]);
+};
+
 export const clearSession = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);

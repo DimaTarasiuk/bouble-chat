@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
@@ -15,6 +16,7 @@ import (
 var (
 	ErrEmptyCredentials   = errors.New("login and password required")
 	ErrPasswordsMismatch  = errors.New("passwords do not match")
+	ErrPasswordTooShort   = errors.New("password too short")
 	ErrUsernameTaken      = errors.New("username already taken")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidRole        = errors.New("invalid role")
@@ -24,6 +26,8 @@ var (
 	ErrBanned             = errors.New("banned")
 	ErrSessionRevoked     = errors.New("session revoked")
 )
+
+const minPasswordLen = 6
 
 type AuthService struct {
 	users  repository.UserRepo
@@ -39,6 +43,9 @@ func (s *AuthService) Register(ctx context.Context, username, password, password
 	gender = strings.TrimSpace(gender)
 	if username == "" || password == "" {
 		return domain.User{}, "", ErrEmptyCredentials
+	}
+	if utf8.RuneCountInString(password) < minPasswordLen {
+		return domain.User{}, "", ErrPasswordTooShort
 	}
 	if password != passwordConfirm {
 		return domain.User{}, "", ErrPasswordsMismatch
@@ -209,6 +216,6 @@ func (s *AuthService) Authorize(ctx context.Context, userID int64, issuedAt time
 	return state, nil
 }
 
-func (s *AuthService) TouchLastSeen(ctx context.Context, username string) error {
-	return s.users.TouchLastSeen(ctx, username)
+func (s *AuthService) TouchLastSeen(ctx context.Context, userID int64) error {
+	return s.users.TouchLastSeen(ctx, userID)
 }

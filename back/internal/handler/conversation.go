@@ -63,8 +63,7 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req createConversationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -96,7 +95,27 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	messages, err := h.svc.Messages(r.Context(), user.ID, convID)
+	q := r.URL.Query()
+	var beforeID *int64
+	if raw := q.Get("before"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
+		beforeID = &id
+	}
+	limit := 0
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
+		limit = n
+	}
+
+	messages, err := h.svc.Messages(r.Context(), user.ID, convID, beforeID, limit)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
 			writeError(w, http.StatusForbidden, "forbidden")
@@ -151,16 +170,17 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 	}
 
 	var req sendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
-	message, err := h.svc.Send(r.Context(), user.ID, user.Username, convID, req.Text, req.ReplyTo)
+	message, conv, err := h.svc.Send(r.Context(), user.ID, user.Username, convID, req.Text, req.ReplyTo)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmptyText):
 			writeError(w, http.StatusBadRequest, "text required")
+		case errors.Is(err, service.ErrTextTooLong):
+			writeError(w, http.StatusBadRequest, "text too long")
 		case errors.Is(err, service.ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden")
 		case errors.Is(err, repository.ErrNotFound):
@@ -175,22 +195,16 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		h.hub.BroadcastTo(convID, data)
 	}
 
-	if conv, err := h.svc.Get(r.Context(), user.ID, convID); err == nil {
-		if notify, err := json.Marshal(map[string]any{
-			"type":            "chat_message",
-			"conversation_id": convID,
-			"from":            message.From,
-			"id":              message.ID,
-		}); err == nil {
-			h.hub.NotifyUser(conv.Peer, notify)
-		}
+	if notify, err := json.Marshal(map[string]any{
+		"type":            "chat_message",
+		"conversation_id": convID,
+		"from":            message.From,
+		"id":              message.ID,
+	}); err == nil {
+		h.hub.NotifyUser(conv.PeerID, notify)
 	}
 
-	_ = h.svc.MarkRead(r.Context(), user.ID, convID)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(message)
+	writeJSON(w, http.StatusCreated, message)
 }
 
 func (h *ConversationHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
@@ -212,16 +226,17 @@ func (h *ConversationHandler) EditMessage(w http.ResponseWriter, r *http.Request
 	}
 
 	var req sendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
-	message, err := h.svc.EditMessage(r.Context(), user.ID, user.Username, convID, msgID, req.Text)
+	message, err := h.svc.EditMessage(r.Context(), user.ID, convID, msgID, req.Text)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmptyText):
 			writeError(w, http.StatusBadRequest, "text required")
+		case errors.Is(err, service.ErrTextTooLong):
+			writeError(w, http.StatusBadRequest, "text too long")
 		case errors.Is(err, service.ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden")
 		case errors.Is(err, service.ErrEditExpired):
@@ -259,7 +274,7 @@ func (h *ConversationHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.hub.ServeConversation(w, r, convID, user.Username)
+	h.hub.ServeConversation(w, r, convID, user.ID, user.Username)
 }
 
 func (h *ConversationHandler) ServePresence(w http.ResponseWriter, r *http.Request) {
@@ -269,11 +284,5 @@ func (h *ConversationHandler) ServePresence(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	h.hub.ServePresence(w, r, user.Username)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	h.hub.ServePresence(w, r, user.ID, user.Username)
 }

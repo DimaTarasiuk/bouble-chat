@@ -19,6 +19,10 @@ import {
   SHADOW_L,
   neu,
   haptic,
+  MIN_PASSWORD_LEN,
+  MAX_MESSAGE_LEN,
+  MESSAGES_PAGE_SIZE,
+  openSocket,
 } from "./shared.js";
 import { Avatar, NeuField } from "./ui.jsx";
 import UserCard from "./admin/UserCard.jsx";
@@ -697,6 +701,10 @@ function AuthScreen({ onAuth, notice = "" }) {
       setError("Заповніть логін і пароль");
       return;
     }
+    if (isRegister && password.length < MIN_PASSWORD_LEN) {
+      setError(`Пароль має бути щонайменше ${MIN_PASSWORD_LEN} символів`);
+      return;
+    }
     if (isRegister && password !== password2) {
       setError("Паролі не співпадають");
       return;
@@ -726,6 +734,8 @@ function AuthScreen({ onAuth, notice = "" }) {
           "username already taken": "Такий логін уже зайнятий",
           "invalid credentials": "Невірний логін або пароль",
           "banned": "Акаунт заблоковано",
+          "password too short": `Пароль має бути щонайменше ${MIN_PASSWORD_LEN} символів`,
+          "too many requests": "Забагато спроб, спробуйте пізніше",
         };
         setError(messages[data.error] || (isRegister ? "Не вдалося зареєструватися" : "Не вдалося увійти"));
         return;
@@ -1280,6 +1290,9 @@ export default function ChatPage() {
   const skipSmooth = useRef(true);
   const activeChatRef = useRef(null);
   const [historyIds, setHistoryIds] = useState(() => new Set());
+  const [hasMore, setHasMore] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const prependRef = useRef(null);
   const notificationSound = useRef(null);
 
   const applyAuth = (session) => {
@@ -1337,6 +1350,7 @@ export default function ChatPage() {
     setLoaded(false);
     skipSmooth.current = true;
     setHistoryIds(new Set());
+    setHasMore(false);
     setActiveChat(null);
     setMyGender("");
     setProfileOpen(false);
@@ -1454,10 +1468,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!username) return;
 
-    const token = localStorage.getItem(TOKEN_KEY);
-    const ws = new WebSocket(
-      `${API_URL.replace("http", "ws")}/ws/presence?token=${encodeURIComponent(token || "")}`
-    );
+    const ws = openSocket("/ws/presence");
 
     ws.onmessage = (e) => {
       try {
@@ -1544,6 +1555,13 @@ export default function ChatPage() {
     const list = listRef.current;
     if (!list) return;
 
+    if (prependRef.current) {
+      const { height, top } = prependRef.current;
+      prependRef.current = null;
+      list.scrollTop = list.scrollHeight - height + top;
+      return;
+    }
+
     if (skipSmooth.current) {
       list.scrollTop = list.scrollHeight;
     } else {
@@ -1562,7 +1580,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!username || !activeChat) return;
 
-    fetch(`${API_URL}/api/conversations/${activeChat.id}/messages`, { headers: authHeaders() })
+    fetch(`${API_URL}/api/conversations/${activeChat.id}/messages?limit=${MESSAGES_PAGE_SIZE}`, { headers: authHeaders() })
       .then(async res => {
         if (res.status === 401) {
           clearSession();
@@ -1575,13 +1593,11 @@ export default function ChatPage() {
         const list = Array.isArray(data) ? data : [];
         setHistoryIds(new Set(list.map(m => m.id)));
         setMessages(list);
+        setHasMore(list.length === MESSAGES_PAGE_SIZE);
         setLoaded(true);
       });
 
-    const token = localStorage.getItem(TOKEN_KEY);
-    const ws = new WebSocket(
-      `${API_URL.replace("http", "ws")}/ws?token=${encodeURIComponent(token || "")}&conversation_id=${activeChat.id}`
-    );
+    const ws = openSocket(`/ws?conversation_id=${activeChat.id}`);
 
     ws.onmessage = (e) => {
       try {
@@ -1618,6 +1634,40 @@ export default function ChatPage() {
 
     return () => ws.close();
   }, [username, activeChat]);
+
+  const loadOlder = () => {
+    if (!activeChat || !hasMore || loadingOlderRef.current) return;
+    const oldest = messages.find((m) => typeof m.id === "number");
+    if (!oldest) return;
+    const chatId = activeChat.id;
+    loadingOlderRef.current = true;
+    fetch(
+      `${API_URL}/api/conversations/${chatId}/messages?before=${oldest.id}&limit=${MESSAGES_PAGE_SIZE}`,
+      { headers: authHeaders() }
+    )
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (activeChatRef.current?.id !== chatId) return;
+        const older = Array.isArray(data) ? data : [];
+        setHasMore(older.length === MESSAGES_PAGE_SIZE);
+        if (!older.length) return;
+        const list = listRef.current;
+        prependRef.current = list ? { height: list.scrollHeight, top: list.scrollTop } : null;
+        setHistoryIds((prev) => {
+          const next = new Set(prev);
+          older.forEach((m) => next.add(m.id));
+          return next;
+        });
+        setMessages((prev) => {
+          const ids = new Set(prev.map((m) => m.id));
+          return [...older.filter((m) => !ids.has(m.id)), ...prev];
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingOlderRef.current = false;
+      });
+  };
 
   const cancelEdit = () => {
     setEditingId(null);
@@ -1774,6 +1824,7 @@ export default function ChatPage() {
   const openChat = (chat) => {
     skipSmooth.current = true;
     setHistoryIds(new Set());
+    setHasMore(false);
     setMessages([]);
     setLoaded(false);
     setInput("");
@@ -1804,6 +1855,7 @@ export default function ChatPage() {
     setLoaded(false);
     skipSmooth.current = true;
     setHistoryIds(new Set());
+    setHasMore(false);
     setInput("");
     setEditingId(null);
     setReplyTo(null);
@@ -1971,7 +2023,7 @@ export default function ChatPage() {
           ) : (
             <>
           {/* Messages */}
-          <div ref={listRef} style={{
+          <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 80) loadOlder(); }} style={{
             flex: 1, overflowY: "auto",
             padding: "16px 18px",
             display: "flex", flexDirection: "column",
@@ -2116,6 +2168,7 @@ export default function ChatPage() {
               <input
                 ref={inputRef}
                 value={input}
+                maxLength={MAX_MESSAGE_LEN}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
                 placeholder={

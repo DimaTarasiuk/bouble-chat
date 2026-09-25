@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
@@ -14,10 +15,31 @@ var (
 	ErrCannotChatSelf = errors.New("cannot chat with yourself")
 	ErrForbidden      = errors.New("forbidden")
 	ErrEmptyText      = errors.New("text required")
+	ErrTextTooLong    = errors.New("text too long")
 	ErrEditExpired    = errors.New("edit window expired")
 )
 
-const messageEditWindow = 10 * time.Minute
+const (
+	messageEditWindow = 10 * time.Minute
+	maxMessageLen     = 1000
+	defaultPageSize   = 50
+	maxPageSize       = 200
+)
+
+func validateText(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", ErrEmptyText
+	}
+	if utf8.RuneCountInString(text) > maxMessageLen {
+		return "", ErrTextTooLong
+	}
+	return text, nil
+}
+
+func isAuthor(m domain.Message, userID int64) bool {
+	return m.UserID != nil && *m.UserID == userID
+}
 
 type ConversationService struct {
 	users repository.UserRepo
@@ -87,15 +109,21 @@ func (s *ConversationService) Get(ctx context.Context, userID, convID int64) (do
 	return c, nil
 }
 
-func (s *ConversationService) Messages(ctx context.Context, userID, convID int64) ([]domain.Message, error) {
+func (s *ConversationService) Messages(ctx context.Context, userID, convID int64, beforeID *int64, limit int) ([]domain.Message, error) {
 	if _, err := s.Get(ctx, userID, convID); err != nil {
 		return nil, err
 	}
-	messages, err := s.msgs.GetByConversation(ctx, convID)
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	limit = min(limit, maxPageSize)
+	messages, err := s.msgs.ListPage(ctx, convID, beforeID, limit)
 	if err != nil {
 		return nil, err
 	}
-	_ = s.convs.MarkRead(ctx, convID, userID)
+	if beforeID == nil {
+		_ = s.convs.MarkRead(ctx, convID, userID)
+	}
 	return messages, nil
 }
 
@@ -106,34 +134,40 @@ func (s *ConversationService) MarkRead(ctx context.Context, userID, convID int64
 	return s.convs.MarkRead(ctx, convID, userID)
 }
 
-func (s *ConversationService) Send(ctx context.Context, userID int64, username string, convID int64, text string, replyToID *int64) (domain.Message, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return domain.Message{}, ErrEmptyText
+func (s *ConversationService) Send(ctx context.Context, userID int64, username string, convID int64, text string, replyToID *int64) (domain.Message, domain.Conversation, error) {
+	text, err := validateText(text)
+	if err != nil {
+		return domain.Message{}, domain.Conversation{}, err
 	}
-	if _, err := s.Get(ctx, userID, convID); err != nil {
-		return domain.Message{}, err
+	conv, err := s.Get(ctx, userID, convID)
+	if err != nil {
+		return domain.Message{}, domain.Conversation{}, err
 	}
 	if replyToID != nil {
 		reply, replyConvID, err := s.msgs.GetByID(ctx, *replyToID)
 		if err != nil {
-			return domain.Message{}, err
+			return domain.Message{}, domain.Conversation{}, err
 		}
 		if replyConvID != convID {
-			return domain.Message{}, ErrForbidden
+			return domain.Message{}, domain.Conversation{}, ErrForbidden
 		}
 		// Reply only to the other person's messages
-		if reply.From == username {
-			return domain.Message{}, ErrForbidden
+		if isAuthor(reply, userID) {
+			return domain.Message{}, domain.Conversation{}, ErrForbidden
 		}
 	}
-	return s.msgs.Create(ctx, convID, username, text, replyToID)
+	msg, err := s.msgs.Create(ctx, convID, userID, username, text, replyToID)
+	if err != nil {
+		return domain.Message{}, domain.Conversation{}, err
+	}
+	_ = s.convs.MarkRead(ctx, convID, userID)
+	return msg, conv, nil
 }
 
-func (s *ConversationService) EditMessage(ctx context.Context, userID int64, username string, convID, msgID int64, text string) (domain.Message, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return domain.Message{}, ErrEmptyText
+func (s *ConversationService) EditMessage(ctx context.Context, userID, convID, msgID int64, text string) (domain.Message, error) {
+	text, err := validateText(text)
+	if err != nil {
+		return domain.Message{}, err
 	}
 	if _, err := s.Get(ctx, userID, convID); err != nil {
 		return domain.Message{}, err
@@ -146,7 +180,7 @@ func (s *ConversationService) EditMessage(ctx context.Context, userID int64, use
 	if msgConvID != convID {
 		return domain.Message{}, ErrForbidden
 	}
-	if msg.From != username {
+	if !isAuthor(msg, userID) {
 		return domain.Message{}, ErrForbidden
 	}
 	if time.Since(msg.CreatedAt) > messageEditWindow {

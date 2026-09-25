@@ -38,7 +38,7 @@ type UserRepo interface {
 	ListAll(ctx context.Context) ([]domain.User, error)
 	UpdateRole(ctx context.Context, username, role string) (domain.User, error)
 	UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error)
-	TouchLastSeen(ctx context.Context, username string) error
+	TouchLastSeen(ctx context.Context, id int64) error
 	GetAuthState(ctx context.Context, id int64) (domain.AuthState, error)
 }
 
@@ -52,6 +52,10 @@ func NewUserRepository() *UserRepository {
 	return &UserRepository{
 		db: pool,
 	}
+}
+
+func (r *UserRepository) Close() {
+	r.db.Close()
 }
 
 const userReturning = `id, username, role, first_name, last_name, birth_date, gender, last_seen_at, banned_at, ban_reason, password_hash, created_at`
@@ -75,12 +79,17 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	return u, nil
 }
 
+const newUserAnnouncements = 3
+
 func (r *UserRepository) Create(ctx context.Context, username, passwordHash, gender string) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, gender, last_announcement_id)
-		VALUES ($1, $2, $3, COALESCE((SELECT MAX(id) FROM announcements), 0))
+		VALUES ($1, $2, $3, COALESCE(
+			(SELECT id FROM announcements ORDER BY id DESC OFFSET $4 LIMIT 1),
+			0
+		))
 		RETURNING `+userReturning+`
-	`, username, passwordHash, gender))
+	`, username, passwordHash, gender, newUserAnnouncements))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -225,11 +234,11 @@ func (r *UserRepository) GetAuthState(ctx context.Context, id int64) (domain.Aut
 	return s, nil
 }
 
-func (r *UserRepository) TouchLastSeen(ctx context.Context, username string) error {
+func (r *UserRepository) TouchLastSeen(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE users
 		SET last_seen_at = NOW()
-		WHERE username = $1
-	`, username)
+		WHERE id = $1
+	`, id)
 	return err
 }
