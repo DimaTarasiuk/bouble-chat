@@ -46,7 +46,7 @@ func main() {
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "PATCH", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}))
 
@@ -65,11 +65,14 @@ func main() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(authH.Middleware)
+		r.Get("/api/me", authH.Me)
 		r.Get("/api/users", chatH.SearchUsers)
 		r.Get("/api/conversations", chatH.List)
 		r.Post("/api/conversations", chatH.Create)
 		r.Get("/api/conversations/{id}/messages", chatH.GetMessages)
 		r.Post("/api/conversations/{id}/messages", chatH.SendMessage)
+
+		r.Post("/api/admin/users/role", authH.SetRole)
 	})
 
 	serveFrontend(r)

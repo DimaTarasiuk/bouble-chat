@@ -7,6 +7,9 @@ const API_URL = (
 ).replace(/\/$/, "");
 const TOKEN_KEY = "chat_token";
 const USER_KEY = "chat_username";
+const ROLE_KEY = "chat_role";
+
+const isStaffRole = (role) => role === "head" || role === "admin";
 
 const authHeaders = () => {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -19,6 +22,7 @@ const authHeaders = () => {
 const clearSession = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(ROLE_KEY);
 };
 
 const createNotificationSound = () => {
@@ -255,7 +259,8 @@ function AuthScreen({ onAuth }) {
   const saveSession = (data) => {
     localStorage.setItem(TOKEN_KEY, data.token);
     localStorage.setItem(USER_KEY, data.user.username);
-    onAuth(data.user.username);
+    localStorage.setItem(ROLE_KEY, data.user.role || "user");
+    onAuth({ username: data.user.username, role: data.user.role || "user" });
   };
 
   const handleSubmit = async () => {
@@ -589,16 +594,33 @@ export default function ChatPage() {
     const saved = localStorage.getItem(USER_KEY);
     return token && saved ? saved : null;
   });
+  const [role, setRole] = useState(() => localStorage.getItem(ROLE_KEY) || "user");
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
+  const [onlineCount, setOnlineCount] = useState(0);
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
   const [historyIds, setHistoryIds] = useState(() => new Set());
   const notificationSound = useRef(null);
+
+  const applyAuth = (session) => {
+    if (!session) {
+      setUsername(null);
+      setRole("user");
+      return;
+    }
+    if (typeof session === "string") {
+      setUsername(session);
+      setRole(localStorage.getItem(ROLE_KEY) || "user");
+      return;
+    }
+    setUsername(session.username);
+    setRole(session.role || "user");
+  };
 
   useEffect(() => {
     notificationSound.current = createNotificationSound();
@@ -609,8 +631,30 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    if (!username) return;
+    fetch(`${API_URL}/api/me`, { headers: authHeaders() })
+      .then(async (res) => {
+        if (res.status === 401) {
+          clearSession();
+          applyAuth(null);
+          return null;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!data?.user?.username) return;
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(USER_KEY, data.user.username);
+        localStorage.setItem(ROLE_KEY, data.user.role || "user");
+        setRole(data.user.role || "user");
+      })
+      .catch(() => {});
+  }, [username]);
+
+  useEffect(() => {
     if (!username) {
       setOnlineUsers(new Set());
+      setOnlineCount(0);
       return;
     }
 
@@ -622,6 +666,9 @@ export default function ChatPage() {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        if (typeof data.online_count === "number") {
+          setOnlineCount(data.online_count);
+        }
         if (data.type === "presence_snapshot" && Array.isArray(data.online)) {
           setOnlineUsers(new Set(data.online));
           return;
@@ -677,7 +724,7 @@ export default function ChatPage() {
       .then(async res => {
         if (res.status === 401) {
           clearSession();
-          setUsername(null);
+          applyAuth(null);
           return [];
         }
         return res.json();
@@ -747,7 +794,7 @@ export default function ChatPage() {
       });
       if (res.status === 401) {
         clearSession();
-        setUsername(null);
+        applyAuth(null);
         return;
       }
       const savedMsg = await res.json();
@@ -792,13 +839,15 @@ export default function ChatPage() {
     setHistoryIds(new Set());
     setActiveChat(null);
     setOnlineUsers(new Set());
-    setUsername(null);
+    setOnlineCount(0);
+    applyAuth(null);
   };
 
   const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
+  const showOnlineStats = isStaffRole(role);
 
   if (!username) {
-    return <AuthScreen onAuth={setUsername} />;
+    return <AuthScreen onAuth={applyAuth} />;
   }
 
   return (
@@ -860,12 +909,14 @@ export default function ChatPage() {
                 fontWeight: 600,
                 color: activeChat ? (peerOnline ? "#86efac" : "#9ca3af") : "#9ca3af",
               }}>
-                {activeChat ? (peerOnline ? "● Online" : "Offline") : "Приватні чати"}
+                {activeChat
+                  ? (peerOnline ? "● Online" : "Offline")
+                  : (showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати")}
               </div>
             </div>
             <div style={{ marginLeft: "auto", textAlign: "right" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
-                {username}
+                {username}{showOnlineStats ? ` · ${role}` : ""}
               </div>
               <button
                 className="neu-press-soft"

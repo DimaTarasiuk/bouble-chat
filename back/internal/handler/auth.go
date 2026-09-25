@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chat.com/internal/domain"
+	"chat.com/internal/repository"
 	"chat.com/internal/service"
 	jwtpkg "chat.com/pkg/jwt"
 )
@@ -19,6 +20,7 @@ const userKey contextKey = "authUser"
 type AuthUser struct {
 	ID       int64
 	Username string
+	Role     string
 }
 
 func UserFromContext(ctx context.Context) (AuthUser, bool) {
@@ -102,6 +104,74 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(authResponse{Token: token, User: user})
 }
 
+func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	me, err := h.svc.Me(r.Context(), user.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	token, err := jwtpkg.GenerateToken(me.ID, me.Username, me.Role, h.secret)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, authResponse{Token: token, User: me})
+}
+
+type setRoleRequest struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+}
+
+func (h *AuthHandler) SetRole(w http.ResponseWriter, r *http.Request) {
+	actor, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	actorUser, err := h.svc.Me(r.Context(), actor.ID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req setRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	user, err := h.svc.SetRole(r.Context(), actorUser.Role, req.Username, req.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden")
+		case errors.Is(err, service.ErrInvalidRole):
+			writeError(w, http.StatusBadRequest, "invalid role")
+		case errors.Is(err, service.ErrCannotChangeHead):
+			writeError(w, http.StatusForbidden, "cannot change head role")
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "user not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
 func (h *AuthHandler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
@@ -116,12 +186,39 @@ func (h *AuthHandler) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		role := claims.Role
+		if role == "" {
+			role = domain.RoleUser
+		}
+
 		ctx := context.WithValue(r.Context(), userKey, AuthUser{
 			ID:       claims.UserID,
 			Username: claims.Username,
+			Role:     role,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (h *AuthHandler) RequireRoles(roles ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(roles))
+	for _, role := range roles {
+		allowed[role] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := UserFromContext(r.Context())
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			if _, ok := allowed[user.Role]; !ok {
+				writeError(w, http.StatusForbidden, "forbidden")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (h *AuthHandler) WSAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -132,9 +229,15 @@ func (h *AuthHandler) WSAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		role := claims.Role
+		if role == "" {
+			role = domain.RoleUser
+		}
+
 		ctx := context.WithValue(r.Context(), userKey, AuthUser{
 			ID:       claims.UserID,
 			Username: claims.Username,
+			Role:     role,
 		})
 		next(w, r.WithContext(ctx))
 	}
