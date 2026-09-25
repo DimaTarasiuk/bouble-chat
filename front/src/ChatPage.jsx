@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } from "react";
 import notificationMp3 from "./static/bulk-10.mp3";
 import {
   API_URL,
@@ -31,6 +31,22 @@ import AnnouncementsPanel from "./admin/AnnouncementsPanel.jsx";
 import FeedbackPanel from "./admin/FeedbackPanel.jsx";
 import FeedbackForm from "./FeedbackForm.jsx";
 import AnnouncementPopup from "./AnnouncementPopup.jsx";
+
+const PANE_DIVIDER = "rgba(163, 177, 198, 0.35)";
+const DESKTOP_QUERY = "(min-width: 900px)";
+const PHONE_QUERY = "(max-width: 480px)";
+
+function useMediaQuery(query) {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
 
 const mergeAnnouncements = (prev, incoming) => {
   const seen = new Set(prev.map((a) => a.id));
@@ -99,6 +115,11 @@ function AppStyles() {
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { background: ${NEU_BG}; }
       ::-webkit-scrollbar { width: 0; }
+      @media ${DESKTOP_QUERY} {
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(163, 177, 198, 0.55); border-radius: 3px; }
+      }
       @keyframes fadeUp {
         from { opacity: 0; transform: translateY(10px); }
         to   { opacity: 1; transform: translateY(0); }
@@ -292,7 +313,7 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
 
       <div
         style={{
-        maxWidth: "68%",
+        maxWidth: "min(68%, 560px)",
         display: "flex",
         flexDirection: "column",
         alignItems: isMe ? "flex-end" : "flex-start",
@@ -902,7 +923,7 @@ function AuthScreen({ onAuth, notice = "" }) {
 
 function ConversationsScreen({
   onOpen, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged,
-  feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen,
+  feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen, activeChatId = null,
 }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
@@ -1145,6 +1166,7 @@ function ConversationsScreen({
           const isOnline = online.has(c.peer);
           const onCol = onlineColor(c.peer_gender);
           const unread = Number(c.unread_count) || 0;
+          const isActive = c.id === activeChatId;
           return (
           <button
             key={c.id}
@@ -1160,7 +1182,7 @@ function ConversationsScreen({
               border: "none",
               borderRadius: 18,
               background: NEU_BG,
-              boxShadow: neu(false, 3, 6),
+              boxShadow: isActive ? neu(true, 3, 6) : neu(false, 3, 6),
               cursor: "pointer",
               fontFamily: "'Nunito', sans-serif",
               textAlign: "left",
@@ -1286,6 +1308,9 @@ export default function ChatPage() {
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
+  const escapeRef = useRef(null);
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  const isPhone = useMediaQuery(PHONE_QUERY);
   const emojiWrapRef = useRef(null);
   const skipSmooth = useRef(true);
   const activeChatRef = useRef(null);
@@ -1862,6 +1887,30 @@ export default function ChatPage() {
     setEmojiOpen(false);
   };
 
+  const activeChatId = activeChat?.id ?? null;
+
+  useEffect(() => {
+    if (isDesktop && activeChatId && loaded) inputRef.current?.focus();
+  }, [isDesktop, activeChatId, loaded]);
+
+  useEffect(() => {
+    escapeRef.current = () => {
+      if (emojiOpen) setEmojiOpen(false);
+      else closeChat();
+    };
+  });
+
+  useEffect(() => {
+    if (!isDesktop || !activeChatId) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target !== document.body && e.target !== inputRef.current) return;
+      escapeRef.current?.();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isDesktop, activeChatId]);
+
   const peerOnline = activeChat ? onlineUsers.has(activeChat.peer) : false;
   const peerOnlineColor = onlineColor(activeChat?.peer_gender);
   const myOnlineColor = onlineColor(myGender);
@@ -1905,123 +1954,147 @@ export default function ChatPage() {
     return <AuthScreen onAuth={applyAuth} notice={authNotice} />;
   }
 
-  return (
-    <>
-      <AppStyles />
-      <AnnouncementPopup queue={announcements} onAck={ackAnnouncement} />
+  const accountBox = (
+    <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
+        {username}{showOnlineStats ? ` · ${role}` : ""}
+      </div>
+      <button
+        className="neu-press-soft"
+        onClick={logout}
+        style={{
+          marginTop: 2,
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          fontFamily: "'Nunito', sans-serif",
+          fontSize: 11,
+          fontWeight: 700,
+          color: "#c084a0",
+          padding: 0,
+        }}
+      >
+        Вийти
+      </button>
+    </div>
+  );
 
-      <div style={{
-        minHeight: "100vh",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: NEU_BG,
-        fontFamily: "'Nunito', sans-serif",
-      }}>
-        <div style={{
-          width: 380, height: 620,
-          background: NEU_BG,
-          borderRadius: 28,
-          boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
-          display: "flex", flexDirection: "column",
-          overflow: "hidden",
+  const listHeader = (
+    <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+      <button
+        className={`neu-press${profileHint ? " profile-hint-pulse" : ""}`}
+        onClick={openProfile}
+        style={{
           position: "relative",
+          width: 44, height: 44, borderRadius: "50%",
+          border: "none", background: NEU_BG,
+          boxShadow: neu(false, 4, 8),
+          cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, fontWeight: 800, color: "#c084a0",
+          fontFamily: "'Nunito', sans-serif",
+          padding: 0,
+          flexShrink: 0,
+        }}
+      >
+        {headerInitials}
+        <span style={{
+          position: "absolute", bottom: 1, right: 1,
+          width: 10, height: 10, borderRadius: "50%",
+          background: onlineUsers.has(username) ? myOnlineColor : ONLINE_OFF,
+          boxShadow: `0 0 0 2px ${NEU_BG}`,
+        }}/>
+      </button>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
+          <span style={{ color: "#868e99" }}>Bouble</span> Chat
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
+          {showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати"}
+        </div>
+      </div>
+      {accountBox}
+    </div>
+  );
+
+  const chatHeader = activeChat && (
+    <div style={{
+      padding: "18px 20px",
+      display: "flex", alignItems: "center", gap: 12,
+      ...(isDesktop ? { borderBottom: `1px solid ${PANE_DIVIDER}` } : {}),
+    }}>
+      {isDesktop ? (
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <Avatar initials={activeChat.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+          <div style={{
+            position: "absolute", bottom: 0, right: 0,
+            width: 9, height: 9, borderRadius: "50%",
+            background: peerOnline ? peerOnlineColor : ONLINE_OFF,
+            boxShadow: `0 0 0 2px ${NEU_BG}`,
+          }}/>
+        </div>
+      ) : (
+        <button
+          className="neu-press"
+          onClick={closeChat}
+          style={{
+            width: 44, height: 44, borderRadius: "50%",
+            border: "none", background: NEU_BG,
+            boxShadow: neu(false, 4, 8),
+            cursor: "pointer",
+            fontSize: 18, fontWeight: 800, color: "#6b8fb5",
+            flexShrink: 0,
+          }}
+        >←</button>
+      )}
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontSize: 15, fontWeight: 800, color: "#4b5563",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
+          {activeChat.peer}
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: peerOnline ? peerOnlineColor : ONLINE_OFF_TEXT }}>
+          {peerOnline ? "● Online" : "Offline"}
+        </div>
+      </div>
+      {isDesktop ? (
+        <button
+          className="neu-press"
+          onClick={closeChat}
+          title="Закрити чат (Esc)"
+          style={{
+            marginLeft: "auto",
+            width: 36, height: 36, borderRadius: "50%",
+            border: "none", background: NEU_BG,
+            boxShadow: neu(false, 3, 6),
+            cursor: "pointer",
+            fontSize: 13, fontWeight: 800, color: "#9ca3af",
+            flexShrink: 0,
+          }}
+        >✕</button>
+      ) : accountBox}
+    </div>
+  );
 
-          {profileOpen && (
-            <ProfileCard onClose={closeProfile} onSaved={onProfileSaved} />
-          )}
+  const conversations = (
+    <ConversationsScreen
+      onOpen={openChat}
+      onlineUsers={onlineUsers}
+      chats={chats}
+      isHead={isHead}
+      adminUsers={adminUsers}
+      onOpenUser={openUserFromAdmin}
+      onAdminUsersChanged={loadAdminUsers}
+      feedbackUnread={feedbackUnread}
+      feedbackTick={feedbackTick}
+      onFeedbackSeen={markFeedbackRead}
+      activeChatId={activeChat?.id ?? null}
+    />
+  );
 
-          {/* Header */}
-          <div style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 12 }}>
-            {activeChat ? (
-              <button
-                className="neu-press"
-                onClick={closeChat}
-                style={{
-                  width: 44, height: 44, borderRadius: "50%",
-                  border: "none", background: NEU_BG,
-                  boxShadow: neu(false, 4, 8),
-                  cursor: "pointer",
-                  fontSize: 18, fontWeight: 800, color: "#6b8fb5",
-                }}
-              >←</button>
-            ) : (
-              <button
-                className={`neu-press${profileHint ? " profile-hint-pulse" : ""}`}
-                onClick={openProfile}
-                style={{
-                  position: "relative",
-                  width: 44, height: 44, borderRadius: "50%",
-                  border: "none", background: NEU_BG,
-                  boxShadow: neu(false, 4, 8),
-                  cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 14, fontWeight: 800, color: "#c084a0",
-                  fontFamily: "'Nunito', sans-serif",
-                  padding: 0,
-                }}
-              >
-                {headerInitials}
-                <span style={{
-                  position: "absolute", bottom: 1, right: 1,
-                  width: 10, height: 10, borderRadius: "50%",
-                  background: onlineUsers.has(username) ? myOnlineColor : ONLINE_OFF,
-                  boxShadow: `0 0 0 2px ${NEU_BG}`,
-                }}/>
-              </button>
-            )}
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-                {activeChat ? activeChat.peer : <><span style={{ color: "#868e99" }}>Bouble</span> Chat</>}
-              </div>
-              <div style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: activeChat ? (peerOnline ? peerOnlineColor : ONLINE_OFF_TEXT) : "#9ca3af",
-              }}>
-                {activeChat
-                  ? (peerOnline ? "● Online" : "Offline")
-                  : (showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати")}
-              </div>
-            </div>
-            <div style={{ marginLeft: "auto", textAlign: "right" }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
-                {username}{showOnlineStats ? ` · ${role}` : ""}
-              </div>
-              <button
-                className="neu-press-soft"
-                onClick={logout}
-                style={{
-                  marginTop: 2,
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  fontFamily: "'Nunito', sans-serif",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "#c084a0",
-                  padding: 0,
-                }}
-              >
-                Вийти
-              </button>
-            </div>
-          </div>
-
-          {!activeChat ? (
-            <ConversationsScreen
-              onOpen={openChat}
-              onlineUsers={onlineUsers}
-              chats={chats}
-              isHead={isHead}
-              adminUsers={adminUsers}
-              onOpenUser={openUserFromAdmin}
-              onAdminUsersChanged={loadAdminUsers}
-              feedbackUnread={feedbackUnread}
-              feedbackTick={feedbackTick}
-              onFeedbackSeen={markFeedbackRead}
-            />
-          ) : (
-            <>
+  const chatBody = (
+    <>
           {/* Messages */}
           <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 80) loadOlder(); }} style={{
             flex: 1, overflowY: "auto",
@@ -2219,10 +2292,91 @@ export default function ChatPage() {
             </button>
             </div>
           </div>
-            </>
-          )}
+    </>
+  );
 
-        </div>
+  const emptyPane = (
+    <div style={{
+      flex: 1,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      gap: 14, padding: 24, textAlign: "center",
+    }}>
+      <div style={{
+        width: 84, height: 84, borderRadius: "50%",
+        background: NEU_BG, boxShadow: neu(false, 6, 14),
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 34,
+      }}>💬</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563" }}>Оберіть чат</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", maxWidth: 280, lineHeight: 1.5 }}>
+        Виберіть діалог зліва або знайдіть користувача за логіном
+      </div>
+    </div>
+  );
+
+  const cardStyle = {
+    background: NEU_BG,
+    borderRadius: isPhone ? 0 : 28,
+    boxShadow: isPhone ? "none" : `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
+    overflow: "hidden",
+    position: "relative",
+    display: "flex",
+  };
+
+  return (
+    <>
+      <AppStyles />
+      <AnnouncementPopup queue={announcements} onAck={ackAnnouncement} />
+
+      <div style={{
+        minHeight: "100dvh",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: NEU_BG,
+        fontFamily: "'Nunito', sans-serif",
+        padding: isDesktop ? 24 : 0,
+      }}>
+        {isDesktop ? (
+          <div style={{
+            ...cardStyle,
+            width: "min(1200px, 100%)",
+            height: "min(860px, calc(100dvh - 48px))",
+            flexDirection: "row",
+          }}>
+            <aside style={{
+              width: 370,
+              flexShrink: 0,
+              display: "flex", flexDirection: "column",
+              position: "relative",
+              borderRight: `1px solid ${PANE_DIVIDER}`,
+            }}>
+              {profileOpen && (
+                <ProfileCard onClose={closeProfile} onSaved={onProfileSaved} />
+              )}
+              {listHeader}
+              {conversations}
+            </aside>
+            <section style={{
+              flex: 1, minWidth: 0,
+              display: "flex", flexDirection: "column",
+              position: "relative",
+            }}>
+              {activeChat ? <>{chatHeader}{chatBody}</> : emptyPane}
+            </section>
+          </div>
+        ) : (
+          <div style={{
+            ...cardStyle,
+            width: isPhone ? "100%" : 380,
+            height: isPhone ? "100dvh" : 620,
+            flexDirection: "column",
+          }}>
+            {profileOpen && (
+              <ProfileCard onClose={closeProfile} onSaved={onProfileSaved} />
+            )}
+            {activeChat ? <>{chatHeader}{chatBody}</> : <>{listHeader}{conversations}</>}
+          </div>
+        )}
       </div>
     </>
   );
