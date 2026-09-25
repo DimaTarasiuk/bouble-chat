@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -54,8 +53,7 @@ type authResponse struct {
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -66,6 +64,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "login and password required")
 		case errors.Is(err, service.ErrPasswordsMismatch):
 			writeError(w, http.StatusBadRequest, "passwords do not match")
+		case errors.Is(err, service.ErrPasswordTooShort):
+			writeError(w, http.StatusBadRequest, "password too short")
 		case errors.Is(err, service.ErrGenderRequired):
 			writeError(w, http.StatusBadRequest, "gender required")
 		case errors.Is(err, service.ErrUsernameTaken):
@@ -76,9 +76,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(authResponse{Token: token, User: user})
+	writeJSON(w, http.StatusCreated, authResponse{Token: token, User: user})
 }
 
 type loginRequest struct {
@@ -88,8 +86,7 @@ type loginRequest struct {
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -108,8 +105,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(authResponse{Token: token, User: user})
+	writeJSON(w, http.StatusOK, authResponse{Token: token, User: user})
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -153,8 +149,7 @@ func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req updateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -200,8 +195,7 @@ func (h *AuthHandler) SetRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req setRoleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -258,16 +252,16 @@ func (h *AuthHandler) ListAllUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	onlineSet := map[string]struct{}{}
+	onlineSet := map[int64]struct{}{}
 	if h.hub != nil {
-		for _, name := range h.hub.OnlineUsers() {
-			onlineSet[name] = struct{}{}
+		for _, id := range h.hub.OnlineUserIDs() {
+			onlineSet[id] = struct{}{}
 		}
 	}
 
 	out := make([]adminUserResponse, 0, len(users))
 	for _, u := range users {
-		_, online := onlineSet[u.Username]
+		_, online := onlineSet[u.ID]
 		out = append(out, adminUserResponse{
 			ID:        u.ID,
 			Username:  u.Username,
@@ -356,7 +350,7 @@ func (h *AuthHandler) RequireRoles(roles ...string) func(http.Handler) http.Hand
 
 func (h *AuthHandler) WSAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authUser, status, msg := h.authenticate(r.Context(), r.URL.Query().Get("token"))
+		authUser, status, msg := h.authenticate(r.Context(), ws.TokenFromRequest(r))
 		if status != 0 {
 			http.Error(w, msg, status)
 			return
@@ -365,10 +359,4 @@ func (h *AuthHandler) WSAuth(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), userKey, authUser)
 		next(w, r.WithContext(ctx))
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

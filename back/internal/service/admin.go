@@ -30,18 +30,17 @@ func NewAdminService(users repository.UserRepo, admin repository.AdminRepo) *Adm
 	return &AdminService{users: users, admin: admin}
 }
 
-func (s *AdminService) UserCard(ctx context.Context, username string, online bool) (domain.UserCard, error) {
+func (s *AdminService) UserCard(ctx context.Context, username string) (domain.UserCard, error) {
 	u, err := s.users.GetByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
 		return domain.UserCard{}, err
 	}
-	chats, messages, err := s.admin.UserCounts(ctx, u.ID, u.Username)
+	chats, messages, err := s.admin.UserCounts(ctx, u.ID)
 	if err != nil {
 		return domain.UserCard{}, err
 	}
 	return domain.UserCard{
 		User:          u,
-		Online:        online,
 		ChatsCount:    chats,
 		MessagesCount: messages,
 	}, nil
@@ -91,8 +90,8 @@ func (s *AdminService) Kick(ctx context.Context, actorID int64, username string)
 	return target, nil
 }
 
-func (s *AdminService) Stats(ctx context.Context, onlineUsers []string) (domain.Stats, error) {
-	return s.admin.Stats(ctx, onlineUsers)
+func (s *AdminService) Stats(ctx context.Context, onlineUserIDs []int64) (domain.Stats, error) {
+	return s.admin.Stats(ctx, onlineUserIDs)
 }
 
 func (s *AdminService) RecordOnline(ctx context.Context, count int) error {
@@ -139,6 +138,6 @@ func (s *AdminService) MarkFeedbackRead(ctx context.Context, userID, lastID int6
 	return s.admin.MarkFeedbackRead(ctx, userID, lastID)
 }
 
-func (s *AdminService) FeedbackReaders(ctx context.Context) ([]string, error) {
-	return s.admin.HeadUsernames(ctx)
+func (s *AdminService) FeedbackReaders(ctx context.Context) ([]int64, error) {
+	return s.admin.HeadIDs(ctx)
 }
