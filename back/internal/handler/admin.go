@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 
+	"chat.com/internal/domain"
 	"chat.com/internal/repository"
 	"chat.com/internal/service"
 	"chat.com/pkg/ws"
@@ -178,4 +180,82 @@ func (h *AdminHandler) AckAnnouncement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type feedbackRequest struct {
+	Text string `json:"text"`
+}
+
+func (h *AdminHandler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+	user, _ := UserFromContext(r.Context())
+	var req feedbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	f, err := h.svc.CreateFeedback(r.Context(), user.ID, req.Text)
+	if err != nil {
+		if errors.Is(err, service.ErrFeedbackInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid feedback")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	h.notifyFeedback(r.Context(), f)
+	writeJSON(w, http.StatusCreated, f)
+}
+
+func (h *AdminHandler) ListFeedback(w http.ResponseWriter, r *http.Request) {
+	list, err := h.svc.ListFeedback(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (h *AdminHandler) UnreadFeedback(w http.ResponseWriter, r *http.Request) {
+	user, _ := UserFromContext(r.Context())
+	n, err := h.svc.UnreadFeedbackCount(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": n})
+}
+
+type feedbackReadRequest struct {
+	LastID int64 `json:"last_id"`
+}
+
+func (h *AdminHandler) MarkFeedbackRead(w http.ResponseWriter, r *http.Request) {
+	user, _ := UserFromContext(r.Context())
+	var req feedbackReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LastID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := h.svc.MarkFeedbackRead(r.Context(), user.ID, req.LastID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AdminHandler) notifyFeedback(ctx context.Context, f domain.Feedback) {
+	if h.hub == nil {
+		return
+	}
+	readers, err := h.svc.FeedbackReaders(ctx)
+	if err != nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{"type": "feedback", "feedback": f})
+	if err != nil {
+		return
+	}
+	for _, name := range readers {
+		h.hub.NotifyUser(name, payload)
+	}
 }

@@ -28,6 +28,12 @@ type AdminRepo interface {
 	ListAnnouncements(ctx context.Context, limit int) ([]domain.Announcement, error)
 	PendingAnnouncements(ctx context.Context, userID int64) ([]domain.Announcement, error)
 	AckAnnouncement(ctx context.Context, userID, announcementID int64) error
+
+	CreateFeedback(ctx context.Context, userID int64, text string) (domain.Feedback, error)
+	ListFeedback(ctx context.Context, limit int) ([]domain.Feedback, error)
+	UnreadFeedbackCount(ctx context.Context, userID int64) (int, error)
+	MarkFeedbackRead(ctx context.Context, userID, lastID int64) error
+	HeadUsernames(ctx context.Context) ([]string, error)
 }
 
 func NewAdminRepository() *AdminRepository {
@@ -264,4 +270,79 @@ func (r *AdminRepository) queryAnnouncements(ctx context.Context, q string, args
 		list = append(list, a)
 	}
 	return list, rows.Err()
+}
+
+func (r *AdminRepository) CreateFeedback(ctx context.Context, userID int64, text string) (domain.Feedback, error) {
+	var f domain.Feedback
+	err := r.db.QueryRow(ctx, `
+		WITH inserted AS (
+			INSERT INTO feedback (user_id, text)
+			VALUES ($1, $2)
+			RETURNING id, user_id, text, created_at
+		)
+		SELECT i.id, COALESCE(u.username, ''), i.text, i.created_at
+		FROM inserted i
+		LEFT JOIN users u ON u.id = i.user_id
+	`, userID, text).Scan(&f.ID, &f.Username, &f.Text, &f.CreatedAt)
+	return f, err
+}
+
+func (r *AdminRepository) ListFeedback(ctx context.Context, limit int) ([]domain.Feedback, error) {
+	list := make([]domain.Feedback, 0)
+	rows, err := r.db.Query(ctx, `
+		SELECT f.id, COALESCE(u.username, ''), f.text, f.created_at
+		FROM feedback f
+		LEFT JOIN users u ON u.id = f.user_id
+		ORDER BY f.id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f domain.Feedback
+		if err := rows.Scan(&f.ID, &f.Username, &f.Text, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, f)
+	}
+	return list, rows.Err()
+}
+
+func (r *AdminRepository) UnreadFeedbackCount(ctx context.Context, userID int64) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM feedback f
+		JOIN users me ON me.id = $1
+		WHERE f.id > me.last_feedback_id
+	`, userID).Scan(&n)
+	return n, err
+}
+
+func (r *AdminRepository) MarkFeedbackRead(ctx context.Context, userID, lastID int64) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET last_feedback_id = GREATEST(last_feedback_id, LEAST($2, (SELECT COALESCE(MAX(id), 0) FROM feedback)))
+		WHERE id = $1
+	`, userID, lastID)
+	return err
+}
+
+func (r *AdminRepository) HeadUsernames(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT username FROM users WHERE role = $1`, domain.RoleHead)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
