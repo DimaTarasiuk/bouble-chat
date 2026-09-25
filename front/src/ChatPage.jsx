@@ -1957,7 +1957,16 @@ export default function ChatPage() {
           </div>
 
           {/* Input */}
-          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div
+            ref={emojiWrapRef}
+            style={{
+              padding: "14px 16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              minWidth: 0,
+            }}
+          >
             {editingId != null && (
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -2006,53 +2015,59 @@ export default function ChatPage() {
                 >✕</button>
               </div>
             )}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {emojiOpen && (
+              <div style={{
+                width: "100%",
+                maxWidth: "100%",
+                boxSizing: "border-box",
+                maxHeight: 196,
+                overflowY: "auto",
+                overflowX: "hidden",
+                padding: 8,
+                borderRadius: 18,
+                background: NEU_BG,
+                boxShadow: neu(false, 5, 12),
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(36px, 1fr))",
+                gap: 2,
+                justifyItems: "center",
+                alignItems: "center",
+              }}>
+                {EMOJIS.map((em) => (
+                  <button
+                    key={em}
+                    type="button"
+                    className="neu-press-soft"
+                    onClick={() => insertEmoji(em)}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      fontSize: 20,
+                      lineHeight: 1,
+                      width: "100%",
+                      maxWidth: 40,
+                      aspectRatio: "1",
+                      padding: 0,
+                      borderRadius: 10,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <div
-              ref={emojiWrapRef}
               style={{
               flex: 1, display: "flex", alignItems: "center",
               background: NEU_BG, borderRadius: 50,
               boxShadow: neu(true, 4, 8), padding: "0 16px",
-              position: "relative",
+              minWidth: 0,
             }}>
-              {emojiOpen && (
-                <div style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: "calc(100% + 10px)",
-                  maxHeight: 196,
-                  overflowY: "auto",
-                  padding: 10,
-                  borderRadius: 18,
-                  background: NEU_BG,
-                  boxShadow: neu(false, 5, 12),
-                  display: "grid",
-                  gridTemplateColumns: "repeat(8, 1fr)",
-                  gap: 4,
-                  zIndex: 8,
-                }}>
-                  {EMOJIS.map((em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      className="neu-press-soft"
-                      onClick={() => insertEmoji(em)}
-                      style={{
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        fontSize: 20,
-                        lineHeight: 1.2,
-                        padding: 4,
-                        borderRadius: 10,
-                      }}
-                    >
-                      {em}
-                    </button>
-                  ))}
-                </div>
-              )}
               <input
                 ref={inputRef}
                 value={input}
@@ -2069,6 +2084,7 @@ export default function ChatPage() {
                   fontFamily: "'Nunito', sans-serif",
                   fontSize: 13, fontWeight: 600,
                   color: "#4b5563", padding: "13px 0",
+                  minWidth: 0,
                 }}
               />
               <button
@@ -2080,6 +2096,7 @@ export default function ChatPage() {
                   border: "none", background: "transparent",
                   cursor: "pointer", fontSize: 17, padding: "0 0 0 8px",
                   color: emojiOpen ? "#6b8fb5" : "#9ca3af",
+                  flexShrink: 0,
                 }}
               >😊</button>
             </div>
