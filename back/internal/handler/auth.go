@@ -129,6 +129,50 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, authResponse{Token: token, User: me})
 }
 
+type updateProfileRequest struct {
+	Username  string  `json:"username"`
+	FirstName string  `json:"first_name"`
+	LastName  string  `json:"last_name"`
+	BirthDate *string `json:"birth_date"`
+	Gender    string  `json:"gender"`
+}
+
+func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req updateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	updated, token, err := h.svc.UpdateProfile(r.Context(), user.ID, service.ProfileInput{
+		Username:  req.Username,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		BirthDate: req.BirthDate,
+		Gender:    req.Gender,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrEmptyCredentials):
+			writeError(w, http.StatusBadRequest, "login and password required")
+		case errors.Is(err, service.ErrUsernameTaken):
+			writeError(w, http.StatusConflict, "username already taken")
+		case errors.Is(err, service.ErrInvalidProfile):
+			writeError(w, http.StatusBadRequest, "invalid profile")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, authResponse{Token: token, User: updated})
+}
+
 type setRoleRequest struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`

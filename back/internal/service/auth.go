@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
@@ -18,6 +19,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidRole        = errors.New("invalid role")
 	ErrCannotChangeHead   = errors.New("cannot change head role")
+	ErrInvalidProfile     = errors.New("invalid profile")
 )
 
 type AuthService struct {
@@ -95,6 +97,56 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (dom
 
 func (s *AuthService) Me(ctx context.Context, userID int64) (domain.User, error) {
 	return s.users.GetByID(ctx, userID)
+}
+
+type ProfileInput struct {
+	Username  string
+	FirstName string
+	LastName  string
+	BirthDate *string
+	Gender    string
+}
+
+func (s *AuthService) UpdateProfile(ctx context.Context, userID int64, in ProfileInput) (domain.User, string, error) {
+	username := strings.TrimSpace(in.Username)
+	if username == "" {
+		return domain.User{}, "", ErrEmptyCredentials
+	}
+	if !domain.ValidGender(in.Gender) {
+		return domain.User{}, "", ErrInvalidProfile
+	}
+
+	var birth *time.Time
+	if in.BirthDate != nil {
+		raw := strings.TrimSpace(*in.BirthDate)
+		if raw != "" {
+			parsed, err := time.Parse("2006-01-02", raw)
+			if err != nil {
+				return domain.User{}, "", ErrInvalidProfile
+			}
+			birth = &parsed
+		}
+	}
+
+	user, err := s.users.UpdateProfile(ctx, userID, repository.ProfileUpdate{
+		Username:  username,
+		FirstName: strings.TrimSpace(in.FirstName),
+		LastName:  strings.TrimSpace(in.LastName),
+		BirthDate: birth,
+		Gender:    in.Gender,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrUsernameTaken) {
+			return domain.User{}, "", ErrUsernameTaken
+		}
+		return domain.User{}, "", err
+	}
+
+	token, err := jwtpkg.GenerateToken(user.ID, user.Username, user.Role, s.secret)
+	if err != nil {
+		return domain.User{}, "", err
+	}
+	return user, token, nil
 }
 
 func (s *AuthService) SetRole(ctx context.Context, actorRole, targetUsername, newRole string) (domain.User, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"time"
 
 	"chat.com/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -21,12 +22,21 @@ type UserRepository struct {
 	db *pgxpool.Pool
 }
 
+type ProfileUpdate struct {
+	Username  string
+	FirstName string
+	LastName  string
+	BirthDate *time.Time
+	Gender    string
+}
+
 type UserRepo interface {
 	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
 	GetByID(ctx context.Context, id int64) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
 	Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error)
 	UpdateRole(ctx context.Context, username, role string) (domain.User, error)
+	UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error)
 }
 
 func NewUserRepository() *UserRepository {
@@ -41,14 +51,30 @@ func NewUserRepository() *UserRepository {
 	}
 }
 
-func (r *UserRepository) Create(ctx context.Context, username, passwordHash string) (domain.User, error) {
+func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
-	createQuery := `INSERT INTO users (username, password_hash)
-					VALUES ($1, $2)
-					RETURNING id, username, role, password_hash, created_at`
-	err := r.db.QueryRow(ctx, createQuery, username, passwordHash).Scan(
-		&u.ID, &u.Username, &u.Role, &u.PassHash, &u.CreatedAt,
+	var birth *time.Time
+	err := row.Scan(
+		&u.ID, &u.Username, &u.Role,
+		&u.FirstName, &u.LastName, &birth, &u.Gender,
+		&u.PassHash, &u.CreatedAt,
 	)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if birth != nil {
+		s := birth.Format("2006-01-02")
+		u.BirthDate = &s
+	}
+	return u, nil
+}
+
+func (r *UserRepository) Create(ctx context.Context, username, passwordHash string) (domain.User, error) {
+	u, err := scanUser(r.db.QueryRow(ctx, `
+		INSERT INTO users (username, password_hash)
+		VALUES ($1, $2)
+		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+	`, username, passwordHash))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -57,17 +83,15 @@ func (r *UserRepository) Create(ctx context.Context, username, passwordHash stri
 		log.Printf("Failed to create user with err -> %v", err)
 		return domain.User{}, err
 	}
-
 	return u, nil
 }
 
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (domain.User, error) {
-	var u domain.User
-	err := r.db.QueryRow(ctx, `
-		SELECT id, username, role, password_hash, created_at
+	u, err := scanUser(r.db.QueryRow(ctx, `
+		SELECT id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
 		FROM users
 		WHERE id = $1
-	`, id).Scan(&u.ID, &u.Username, &u.Role, &u.PassHash, &u.CreatedAt)
+	`, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, ErrNotFound
@@ -78,12 +102,11 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (domain.User, er
 }
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (domain.User, error) {
-	var u domain.User
-	err := r.db.QueryRow(ctx, `
-		SELECT id, username, role, password_hash, created_at
+	u, err := scanUser(r.db.QueryRow(ctx, `
+		SELECT id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
 		FROM users
 		WHERE username = $1
-	`, username).Scan(&u.ID, &u.Username, &u.Role, &u.PassHash, &u.CreatedAt)
+	`, username))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, ErrNotFound
@@ -95,13 +118,14 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (do
 
 func (r *UserRepository) Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error) {
 	users := make([]domain.User, 0)
-	sql := `SELECT id, username, role, created_at
-			FROM users
-			WHERE username ILIKE $1
-			  AND id <> $2
-			ORDER BY username
-			LIMIT $3`
-	rows, err := r.db.Query(ctx, sql, query+"%", excludeID, limit)
+	rows, err := r.db.Query(ctx, `
+		SELECT id, username, role, created_at
+		FROM users
+		WHERE username ILIKE $1
+		  AND id <> $2
+		ORDER BY username
+		LIMIT $3
+	`, query+"%", excludeID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +142,37 @@ func (r *UserRepository) Search(ctx context.Context, query string, excludeID int
 }
 
 func (r *UserRepository) UpdateRole(ctx context.Context, username, role string) (domain.User, error) {
-	var u domain.User
-	err := r.db.QueryRow(ctx, `
+	u, err := scanUser(r.db.QueryRow(ctx, `
 		UPDATE users
 		SET role = $2
 		WHERE username = $1
-		RETURNING id, username, role, password_hash, created_at
-	`, username, role).Scan(&u.ID, &u.Username, &u.Role, &u.PassHash, &u.CreatedAt)
+		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+	`, username, role))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.User{}, ErrNotFound
+		}
+		return domain.User{}, err
+	}
+	return u, nil
+}
+
+func (r *UserRepository) UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error) {
+	u, err := scanUser(r.db.QueryRow(ctx, `
+		UPDATE users
+		SET username = $2,
+		    first_name = $3,
+		    last_name = $4,
+		    birth_date = $5,
+		    gender = $6
+		WHERE id = $1
+		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+	`, userID, patch.Username, patch.FirstName, patch.LastName, patch.BirthDate, patch.Gender))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.User{}, ErrUsernameTaken
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, ErrNotFound
 		}

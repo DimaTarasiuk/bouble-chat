@@ -66,6 +66,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authH.Middleware)
 		r.Get("/api/me", authH.Me)
+		r.Patch("/api/me", authH.UpdateProfile)
 		r.Get("/api/users", chatH.SearchUsers)
 		r.Get("/api/conversations", chatH.List)
 		r.Post("/api/conversations", chatH.Create)
