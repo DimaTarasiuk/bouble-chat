@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
 	"chat.com/internal/service"
 	jwtpkg "chat.com/pkg/jwt"
+	"chat.com/pkg/ws"
 )
 
 type contextKey string
@@ -31,10 +33,11 @@ func UserFromContext(ctx context.Context) (AuthUser, bool) {
 type AuthHandler struct {
 	svc    *service.AuthService
 	secret string
+	hub    *ws.Hub
 }
 
-func NewAuth(svc *service.AuthService, secret string) *AuthHandler {
-	return &AuthHandler{svc: svc, secret: secret}
+func NewAuth(svc *service.AuthService, secret string, hub *ws.Hub) *AuthHandler {
+	return &AuthHandler{svc: svc, secret: secret, hub: hub}
 }
 
 type registerRequest struct {
@@ -214,6 +217,60 @@ func (h *AuthHandler) SetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, user)
+}
+
+type adminUserResponse struct {
+	ID        int64      `json:"id"`
+	Username  string     `json:"username"`
+	Role      string     `json:"role"`
+	Online    bool       `json:"online"`
+	LastSeen  *time.Time `json:"last_seen"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+func (h *AuthHandler) ListAllUsers(w http.ResponseWriter, r *http.Request) {
+	actor, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	actorUser, err := h.svc.Me(r.Context(), actor.ID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	users, err := h.svc.ListAllUsers(r.Context(), actorUser.Role)
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	onlineSet := map[string]struct{}{}
+	if h.hub != nil {
+		for _, name := range h.hub.OnlineUsers() {
+			onlineSet[name] = struct{}{}
+		}
+	}
+
+	out := make([]adminUserResponse, 0, len(users))
+	for _, u := range users {
+		_, online := onlineSet[u.Username]
+		out = append(out, adminUserResponse{
+			ID:        u.ID,
+			Username:  u.Username,
+			Role:      u.Role,
+			Online:    online,
+			LastSeen:  u.LastSeen,
+			CreatedAt: u.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *AuthHandler) Middleware(next http.Handler) http.Handler {

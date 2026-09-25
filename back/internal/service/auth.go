@@ -174,3 +174,14 @@ func (s *AuthService) SetRole(ctx context.Context, actorRole, targetUsername, ne
 
 	return s.users.UpdateRole(ctx, targetUsername, newRole)
 }
+
+func (s *AuthService) ListAllUsers(ctx context.Context, actorRole string) ([]domain.User, error) {
+	if actorRole != domain.RoleHead {
+		return nil, ErrForbidden
+	}
+	return s.users.ListAll(ctx)
+}
+
+func (s *AuthService) TouchLastSeen(ctx context.Context, username string) error {
+	return s.users.TouchLastSeen(ctx, username)
+}

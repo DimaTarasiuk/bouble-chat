@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -36,18 +37,22 @@ type Hub struct {
 	online     map[string]int
 	broadcast  chan envelope
 	notifyUser chan userEnvelope
+	onlineReq  chan chan []string
 	register   chan *Client
 	unregister chan *Client
+	onOffline  func(username string)
 }
 
-func NewHub() *Hub {
+func NewHub(onOffline func(username string)) *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
 		online:     make(map[string]int),
 		broadcast:  make(chan envelope, 100),
 		notifyUser: make(chan userEnvelope, 100),
+		onlineReq:  make(chan chan []string, 16),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		onOffline:  onOffline,
 	}
 }
 
@@ -60,6 +65,12 @@ func (h *Hub) NotifyUser(username string, message []byte) {
 		return
 	}
 	h.notifyUser <- userEnvelope{username: username, payload: message}
+}
+
+func (h *Hub) OnlineUsers() []string {
+	resp := make(chan []string, 1)
+	h.onlineReq <- resp
+	return <-resp
 }
 
 func (h *Hub) Run() {
@@ -111,6 +122,9 @@ func (h *Hub) Run() {
 			for _, client := range stale {
 				h.removeClient(client)
 			}
+
+		case resp := <-h.onlineReq:
+			resp <- h.onlineList()
 		}
 	}
 }
@@ -131,6 +145,10 @@ func (h *Hub) removeClient(client *Client) {
 	log.Printf("Client unregistered (%s). Total clients: %d", client.username, len(h.clients))
 	if wentOffline {
 		h.fanoutPresence(client.username, false)
+		if h.onOffline != nil {
+			username := client.username
+			go h.onOffline(username)
+		}
 	}
 }
 
@@ -168,6 +186,7 @@ func (h *Hub) fanoutPresence(username string, online bool) {
 		"user":         username,
 		"online":       online,
 		"online_count": len(list),
+		"last_seen":    time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		return

@@ -35,8 +35,10 @@ type UserRepo interface {
 	GetByID(ctx context.Context, id int64) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
 	Search(ctx context.Context, query string, excludeID int64, limit int) ([]domain.User, error)
+	ListAll(ctx context.Context) ([]domain.User, error)
 	UpdateRole(ctx context.Context, username, role string) (domain.User, error)
 	UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error)
+	TouchLastSeen(ctx context.Context, username string) error
 }
 
 func NewUserRepository() *UserRepository {
@@ -51,12 +53,14 @@ func NewUserRepository() *UserRepository {
 	}
 }
 
+const userReturning = `id, username, role, first_name, last_name, birth_date, gender, last_seen_at, password_hash, created_at`
+
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
 	var birth *time.Time
 	err := row.Scan(
 		&u.ID, &u.Username, &u.Role,
-		&u.FirstName, &u.LastName, &birth, &u.Gender,
+		&u.FirstName, &u.LastName, &birth, &u.Gender, &u.LastSeen,
 		&u.PassHash, &u.CreatedAt,
 	)
 	if err != nil {
@@ -73,7 +77,7 @@ func (r *UserRepository) Create(ctx context.Context, username, passwordHash stri
 	u, err := scanUser(r.db.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash)
 		VALUES ($1, $2)
-		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+		RETURNING `+userReturning+`
 	`, username, passwordHash))
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -88,7 +92,7 @@ func (r *UserRepository) Create(ctx context.Context, username, passwordHash stri
 
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
-		SELECT id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+		SELECT `+userReturning+`
 		FROM users
 		WHERE id = $1
 	`, id))
@@ -103,7 +107,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (domain.User, er
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
-		SELECT id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+		SELECT `+userReturning+`
 		FROM users
 		WHERE username = $1
 	`, username))
@@ -141,12 +145,34 @@ func (r *UserRepository) Search(ctx context.Context, query string, excludeID int
 	return users, rows.Err()
 }
 
+func (r *UserRepository) ListAll(ctx context.Context) ([]domain.User, error) {
+	users := make([]domain.User, 0)
+	rows, err := r.db.Query(ctx, `
+		SELECT id, username, role, last_seen_at, created_at
+		FROM users
+		ORDER BY username
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.LastSeen, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (r *UserRepository) UpdateRole(ctx context.Context, username, role string) (domain.User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx, `
 		UPDATE users
 		SET role = $2
 		WHERE username = $1
-		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+		RETURNING `+userReturning+`
 	`, username, role))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -166,7 +192,7 @@ func (r *UserRepository) UpdateProfile(ctx context.Context, userID int64, patch 
 		    birth_date = $5,
 		    gender = $6
 		WHERE id = $1
-		RETURNING id, username, role, first_name, last_name, birth_date, gender, password_hash, created_at
+		RETURNING `+userReturning+`
 	`, userID, patch.Username, patch.FirstName, patch.LastName, patch.BirthDate, patch.Gender))
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -179,4 +205,13 @@ func (r *UserRepository) UpdateProfile(ctx context.Context, userID int64, patch 
 		return domain.User{}, err
 	}
 	return u, nil
+}
+
+func (r *UserRepository) TouchLastSeen(ctx context.Context, username string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET last_seen_at = NOW()
+		WHERE username = $1
+	`, username)
+	return err
 }
