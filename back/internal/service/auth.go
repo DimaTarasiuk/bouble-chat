@@ -192,8 +192,6 @@ func (s *AuthService) ListAllUsers(ctx context.Context, actorRole string) ([]dom
 	return s.users.ListAll(ctx)
 }
 
-// Authorize checks that a token issued at issuedAt for userID is still valid
-// and returns the current username/role from the database.
 func (s *AuthService) Authorize(ctx context.Context, userID int64, issuedAt time.Time) (domain.AuthState, error) {
 	state, err := s.users.GetAuthState(ctx, userID)
 	if err != nil {
@@ -202,8 +200,6 @@ func (s *AuthService) Authorize(ctx context.Context, userID int64, issuedAt time
 	if state.BannedAt != nil {
 		return domain.AuthState{}, ErrBanned
 	}
-	// JWT iat is truncated to seconds, so a token issued in the same second as the
-	// revoke is also rejected; re-login that fast isn't realistic.
 	if state.SessionsRevokedAt != nil && issuedAt.Before(*state.SessionsRevokedAt) {
 		return domain.AuthState{}, ErrSessionRevoked
 	}

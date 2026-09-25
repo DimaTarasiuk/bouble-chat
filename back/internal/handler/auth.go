@@ -301,7 +301,6 @@ func (h *AuthHandler) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// authenticate returns a non-zero HTTP status and error message when the token is rejected.
 func (h *AuthHandler) authenticate(ctx context.Context, token string) (AuthUser, int, string) {
 	claims, err := jwtpkg.ParseToken(token, h.secret)
 	if err != nil {

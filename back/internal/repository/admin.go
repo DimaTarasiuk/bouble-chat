@@ -92,7 +92,6 @@ func (r *AdminRepository) RevokeSessions(ctx context.Context, userID int64) erro
 	return nil
 }
 
-// "Today" is counted from local midnight in Kyiv.
 const todayStartSQL = `(date_trunc('day', NOW() AT TIME ZONE 'Europe/Kyiv') AT TIME ZONE 'Europe/Kyiv')`
 
 func (r *AdminRepository) Stats(ctx context.Context, onlineUsers []string) (domain.Stats, error) {
