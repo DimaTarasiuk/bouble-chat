@@ -35,6 +35,25 @@ const onlineColor = (gender) => {
   return "#86efac";
 };
 
+const EMOJIS = [
+  "😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊",
+  "😇", "🙂", "😉", "😍", "🥰", "😘", "😗", "😋",
+  "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔",
+  "😐", "😑", "😶", "🙄", "😏", "😣", "😥", "😮",
+  "😯", "😪", "😫", "🥱", "😴", "😌", "😛", "😓",
+  "😕", "🙃", "🫠", "😲", "☹️", "🙁", "😖", "😞",
+  "😟", "😤", "😢", "😭", "😦", "😧", "😨", "😩",
+  "🤯", "😬", "😰", "😱", "🥵", "🥶", "😳", "🤪",
+  "😵", "😡", "😠", "🤬", "😷", "🤒", "🤕", "🤢",
+  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤟",
+  "🤘", "👌", "🤌", "🤏", "👈", "👉", "👆", "👇",
+  "👋", "🤚", "🖐️", "✋", "🖖", "💪", "🙏", "💅",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+  "💔", "❣️", "💕", "💞", "💓", "💗", "💖", "💘",
+  "🔥", "⭐", "✨", "💫", "🎉", "🎊", "🎈", "🎁",
+  "✅", "❌", "❓", "❗", "💯", "💢", "💤", "💬",
+];
+
 const createNotificationSound = () => {
   const audio = new Audio(notificationMp3);
   audio.preload = "auto";
@@ -1261,6 +1280,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
@@ -1273,6 +1293,8 @@ export default function ChatPage() {
   );
   const bottomRef = useRef(null);
   const listRef = useRef(null);
+  const inputRef = useRef(null);
+  const emojiWrapRef = useRef(null);
   const skipSmooth = useRef(true);
   const activeChatRef = useRef(null);
   const [historyIds, setHistoryIds] = useState(() => new Set());
@@ -1547,6 +1569,39 @@ export default function ChatPage() {
 
   const cancelReply = () => setReplyTo(null);
 
+  const insertEmoji = (emoji) => {
+    const el = inputRef.current;
+    const value = input || "";
+    if (!el) {
+      setInput(value + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + emoji + value.slice(end);
+    setInput(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      try {
+        el.setSelectionRange(pos, pos);
+      } catch {
+        // ignore
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const onDown = (e) => {
+      if (emojiWrapRef.current && !emojiWrapRef.current.contains(e.target)) {
+        setEmojiOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [emojiOpen]);
+
   const startEdit = (msg) => {
     if (!canEditMessage(msg, username)) return;
     setReplyTo(null);
@@ -1569,6 +1624,7 @@ export default function ChatPage() {
   const send = async () => {
     const text = input.trim();
     if (!text || !username || !activeChat) return;
+    setEmojiOpen(false);
 
     if (editingId != null) {
       const msgId = editingId;
@@ -1666,6 +1722,7 @@ export default function ChatPage() {
     setInput("");
     setEditingId(null);
     setReplyTo(null);
+    setEmojiOpen(false);
     setActiveChat(chat);
     setChats(prev => {
       const exists = prev.some(c => c.id === chat.id);
@@ -1693,6 +1750,7 @@ export default function ChatPage() {
     setInput("");
     setEditingId(null);
     setReplyTo(null);
+    setEmojiOpen(false);
   };
 
   const logout = () => {
@@ -1949,12 +2007,54 @@ export default function ChatPage() {
               </div>
             )}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
+            <div
+              ref={emojiWrapRef}
+              style={{
               flex: 1, display: "flex", alignItems: "center",
               background: NEU_BG, borderRadius: 50,
               boxShadow: neu(true, 4, 8), padding: "0 16px",
+              position: "relative",
             }}>
+              {emojiOpen && (
+                <div style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: "calc(100% + 10px)",
+                  maxHeight: 196,
+                  overflowY: "auto",
+                  padding: 10,
+                  borderRadius: 18,
+                  background: NEU_BG,
+                  boxShadow: neu(false, 5, 12),
+                  display: "grid",
+                  gridTemplateColumns: "repeat(8, 1fr)",
+                  gap: 4,
+                  zIndex: 8,
+                }}>
+                  {EMOJIS.map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      className="neu-press-soft"
+                      onClick={() => insertEmoji(em)}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        fontSize: 20,
+                        lineHeight: 1.2,
+                        padding: 4,
+                        borderRadius: 10,
+                      }}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
+                ref={inputRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
@@ -1971,10 +2071,17 @@ export default function ChatPage() {
                   color: "#4b5563", padding: "13px 0",
                 }}
               />
-              <button className="neu-press-soft" style={{
-                border: "none", background: "transparent",
-                cursor: "pointer", fontSize: 17, padding: "0 0 0 8px", color: "#9ca3af",
-              }}>😊</button>
+              <button
+                type="button"
+                className="neu-press-soft"
+                onClick={() => setEmojiOpen((v) => !v)}
+                aria-label="Емодзі"
+                style={{
+                  border: "none", background: "transparent",
+                  cursor: "pointer", fontSize: 17, padding: "0 0 0 8px",
+                  color: emojiOpen ? "#6b8fb5" : "#9ca3af",
+                }}
+              >😊</button>
             </div>
 
             {/* кнопка відправки — повернули стилі і іконку */}
