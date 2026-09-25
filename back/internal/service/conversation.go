@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
@@ -13,7 +14,10 @@ var (
 	ErrCannotChatSelf = errors.New("cannot chat with yourself")
 	ErrForbidden      = errors.New("forbidden")
 	ErrEmptyText      = errors.New("text required")
+	ErrEditExpired    = errors.New("edit window expired")
 )
+
+const messageEditWindow = 10 * time.Minute
 
 type ConversationService struct {
 	users repository.UserRepo
@@ -99,4 +103,30 @@ func (s *ConversationService) Send(ctx context.Context, userID int64, username s
 		return domain.Message{}, err
 	}
 	return s.msgs.Create(ctx, convID, username, text)
+}
+
+func (s *ConversationService) EditMessage(ctx context.Context, userID int64, username string, convID, msgID int64, text string) (domain.Message, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return domain.Message{}, ErrEmptyText
+	}
+	if _, err := s.Get(ctx, userID, convID); err != nil {
+		return domain.Message{}, err
+	}
+
+	msg, msgConvID, err := s.msgs.GetByID(ctx, msgID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if msgConvID != convID {
+		return domain.Message{}, ErrForbidden
+	}
+	if msg.From != username {
+		return domain.Message{}, ErrForbidden
+	}
+	if time.Since(msg.CreatedAt) > messageEditWindow {
+		return domain.Message{}, ErrEditExpired
+	}
+
+	return s.msgs.UpdateText(ctx, msgID, text)
 }

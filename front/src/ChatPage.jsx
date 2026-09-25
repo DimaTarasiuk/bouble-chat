@@ -141,9 +141,55 @@ function Avatar({ initials, color }) {
   );
 }
 
-function Bubble({ msg, username, animate = false }) {
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+function canEditMessage(msg, username) {
+  if (!msg || msg.from !== username) return false;
+  if (typeof msg.id !== "number") return false;
+  const created = new Date(msg.time).getTime();
+  if (Number.isNaN(created)) return false;
+  return Date.now() - created <= EDIT_WINDOW_MS;
+}
+
+function Bubble({ msg, username, animate = false, onEdit }) {
   const isMe = msg.from === username;
   const initials = (msg.from || "?").slice(0, 2).toUpperCase();
+  const longPressRef = useRef(null);
+  const movedRef = useRef(false);
+
+  const clearLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  const onPointerDown = (e) => {
+    if (!isMe || !onEdit || !canEditMessage(msg, username)) return;
+    if (e.button != null && e.button !== 0) return;
+    movedRef.current = false;
+    clearLongPress();
+    longPressRef.current = setTimeout(() => {
+      longPressRef.current = null;
+      haptic(18);
+      onEdit(msg);
+    }, 480);
+  };
+
+  const onPointerMove = (e) => {
+    if (!longPressRef.current) return;
+    // cancel if finger slides
+    if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) {
+      movedRef.current = true;
+      clearLongPress();
+    }
+  };
+
+  const onPointerUp = () => clearLongPress();
+  const onPointerCancel = () => clearLongPress();
+  const onContextMenu = (e) => {
+    if (isMe && canEditMessage(msg, username)) e.preventDefault();
+  };
 
   return (
     <div style={{
@@ -162,19 +208,31 @@ function Bubble({ msg, username, animate = false }) {
             {msg.from}
           </span>
         )}
-        <div style={{
-          padding: "11px 16px",
-          borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: isMe ? "#ffffff" : "#f5e8ee",
-          boxShadow: isMe
-            ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
-            : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
-          fontSize: 14,
-          fontWeight: 600,
-          color: "#4b5563",
-          lineHeight: 1.5,
-          fontFamily: "'Nunito', sans-serif",
-        }}>
+        <div
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onPointerLeave={onPointerUp}
+          onContextMenu={onContextMenu}
+          style={{
+            padding: "11px 16px",
+            borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+            background: isMe ? "#ffffff" : "#f5e8ee",
+            boxShadow: isMe
+              ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
+              : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
+            fontSize: 14,
+            fontWeight: 600,
+            color: "#4b5563",
+            lineHeight: 1.5,
+            fontFamily: "'Nunito', sans-serif",
+            touchAction: "manipulation",
+            userSelect: isMe ? "none" : "auto",
+            WebkitUserSelect: isMe ? "none" : "auto",
+            cursor: isMe && canEditMessage(msg, username) ? "pointer" : "default",
+          }}
+        >
           {msg.text}
         </div>
         <span style={{
@@ -916,6 +974,7 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [editingId, setEditingId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
@@ -1067,7 +1126,11 @@ export default function ChatPage() {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type || typeof msg.text !== "string" || !msg.time) return;
+        let shouldNotify = false;
         setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) {
+            return prev.map(m => (m.id === msg.id ? msg : m));
+          }
           // замінюємо тимчасове повідомлення на реальне
           const tempIndex = prev.findIndex(m =>
             typeof m.id === "string" && m.id.startsWith("temp-") && m.from === msg.from
@@ -1077,12 +1140,11 @@ export default function ChatPage() {
             updated[tempIndex] = msg;
             return updated;
           }
-          // не додаємо дублікати
-          if (prev.some(m => m.id === msg.id)) return prev;
+          shouldNotify = msg.from !== username;
           return [...prev, msg];
         });
 
-        if (msg.from !== username) {
+        if (shouldNotify) {
           playNotification(notificationSound);
         }
       } catch (err) {
@@ -1093,9 +1155,46 @@ export default function ChatPage() {
     return () => ws.close();
   }, [username, activeChat]);
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setInput("");
+  };
+
+  const startEdit = (msg) => {
+    if (!canEditMessage(msg, username)) return;
+    setEditingId(msg.id);
+    setInput(msg.text || "");
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || !username || !activeChat) return;
+
+    if (editingId != null) {
+      const msgId = editingId;
+      setEditingId(null);
+      setInput("");
+      try {
+        const res = await fetch(`${API_URL}/api/conversations/${activeChat.id}/messages/${msgId}`, {
+          method: "PATCH",
+          headers: authHeaders(),
+          body: JSON.stringify({ text }),
+        });
+        if (res.status === 401) {
+          clearSession();
+          applyAuth(null);
+          return;
+        }
+        const savedMsg = await res.json().catch(() => ({}));
+        if (!res.ok || typeof savedMsg.text !== "string") {
+          return;
+        }
+        setMessages(prev => prev.map(m => m.id === msgId ? savedMsg : m));
+      } catch (err) {
+        console.error("Помилка редагування:", err);
+      }
+      return;
+    }
 
     const tempId = "temp-" + Date.now();
     const tempMessage = {
@@ -1133,6 +1232,11 @@ export default function ChatPage() {
   };
 
   const onKey = (e) => {
+    if (e.key === "Escape" && editingId != null) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
@@ -1142,6 +1246,7 @@ export default function ChatPage() {
     setMessages([]);
     setLoaded(false);
     setInput("");
+    setEditingId(null);
     setActiveChat(chat);
   };
 
@@ -1151,6 +1256,8 @@ export default function ChatPage() {
     setLoaded(false);
     skipSmooth.current = true;
     setHistoryIds(new Set());
+    setInput("");
+    setEditingId(null);
   };
 
   const logout = () => {
@@ -1320,13 +1427,31 @@ export default function ChatPage() {
                 msg={msg}
                 username={username}
                 animate={!historyIds.has(msg.id)}
+                onEdit={startEdit}
               />
             ))}
             <div ref={bottomRef} />
           </div>
 
           {/* Input */}
-          <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {editingId != null && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "0 4px",
+              }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#6b8fb5" }}>Редагування</span>
+                <button
+                  className="neu-press-soft"
+                  onClick={cancelEdit}
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer",
+                    fontFamily: "'Nunito', sans-serif", fontSize: 12, fontWeight: 700, color: "#9ca3af",
+                  }}
+                >Скасувати</button>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               flex: 1, display: "flex", alignItems: "center",
               background: NEU_BG, borderRadius: 50,
@@ -1336,7 +1461,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={onKey}
-                placeholder="Написати повідомлення..."
+                placeholder={editingId != null ? "Змінити повідомлення..." : "Написати повідомлення..."}
                 style={{
                   flex: 1, border: "none", outline: "none",
                   background: "transparent",
@@ -1369,6 +1494,7 @@ export default function ChatPage() {
                 <polygon points="22 2 15 22 11 13 2 9 22 2"/>
               </svg>
             </button>
+            </div>
           </div>
             </>
           )}

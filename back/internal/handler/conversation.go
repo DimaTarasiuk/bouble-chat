@@ -153,6 +153,54 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(message)
 }
 
+func (h *ConversationHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	convID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	msgID, err := strconv.ParseInt(chi.URLParam(r, "msgId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	var req sendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	message, err := h.svc.EditMessage(r.Context(), user.ID, user.Username, convID, msgID, req.Text)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrEmptyText):
+			writeError(w, http.StatusBadRequest, "text required")
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden")
+		case errors.Is(err, service.ErrEditExpired):
+			writeError(w, http.StatusForbidden, "edit window expired")
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	if data, err := json.Marshal(message); err == nil {
+		h.hub.BroadcastTo(convID, data)
+	}
+
+	writeJSON(w, http.StatusOK, message)
+}
+
 func (h *ConversationHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	user, ok := UserFromContext(r.Context())
 	if !ok {
