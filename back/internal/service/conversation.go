@@ -91,7 +91,19 @@ func (s *ConversationService) Messages(ctx context.Context, userID, convID int64
 	if _, err := s.Get(ctx, userID, convID); err != nil {
 		return nil, err
 	}
-	return s.msgs.GetByConversation(ctx, convID)
+	messages, err := s.msgs.GetByConversation(ctx, convID)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.convs.MarkRead(ctx, convID, userID)
+	return messages, nil
+}
+
+func (s *ConversationService) MarkRead(ctx context.Context, userID, convID int64) error {
+	if _, err := s.Get(ctx, userID, convID); err != nil {
+		return err
+	}
+	return s.convs.MarkRead(ctx, convID, userID)
 }
 
 func (s *ConversationService) Send(ctx context.Context, userID int64, username string, convID int64, text string) (domain.Message, error) {

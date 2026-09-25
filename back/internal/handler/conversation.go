@@ -108,6 +108,30 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, messages)
 }
 
+func (h *ConversationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	convID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	if err := h.svc.MarkRead(r.Context(), user.ID, convID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 type sendMessageRequest struct {
 	Text string `json:"text"`
 }
@@ -147,6 +171,19 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 	if data, err := json.Marshal(message); err == nil {
 		h.hub.BroadcastTo(convID, data)
 	}
+
+	if conv, err := h.svc.Get(r.Context(), user.ID, convID); err == nil {
+		if notify, err := json.Marshal(map[string]any{
+			"type":            "chat_message",
+			"conversation_id": convID,
+			"from":            message.From,
+			"id":              message.ID,
+		}); err == nil {
+			h.hub.NotifyUser(conv.Peer, notify)
+		}
+	}
+
+	_ = h.svc.MarkRead(r.Context(), user.ID, convID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

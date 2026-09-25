@@ -793,26 +793,11 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
+function ConversationsScreen({ onOpen, onLogout, onlineUsers, chats }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
-  const [chats, setChats] = useState([]);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
-      .then(async res => {
-        if (res.status === 401) {
-          clearSession();
-          onLogout();
-          return [];
-        }
-        return res.json();
-      })
-      .then(data => setChats(Array.isArray(data) ? data : []))
-      .catch(() => setChats([]));
-  }, [onLogout]);
 
   useEffect(() => {
     const q = query.trim();
@@ -843,7 +828,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
           : "Не вдалося відкрити чат");
         return;
       }
-      onOpen({ id: data.id, peer: data.peer });
+      onOpen({ id: data.id, peer: data.peer, unread_count: data.unread_count || 0 });
     } catch {
       setError("Не вдалося відкрити чат");
     }
@@ -920,6 +905,7 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
           </div>
         ) : chats.map(c => {
           const isOnline = online.has(c.peer);
+          const unread = Number(c.unread_count) || 0;
           return (
           <button
             key={c.id}
@@ -950,12 +936,31 @@ function ConversationsScreen({ onOpen, onLogout, onlineUsers }) {
                 boxShadow: `0 0 0 2px ${NEU_BG}`,
               }}/>
             </div>
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
               <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#86efac" : "#9ca3af" }}>
                 {isOnline ? "● Online" : "Offline"}
               </div>
             </div>
+            {unread > 0 && (
+              <div style={{
+                minWidth: 22,
+                height: 22,
+                padding: "0 7px",
+                borderRadius: 50,
+                background: "#c084a0",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                boxShadow: neu(false, 2, 4),
+              }}>
+                {unread > 99 ? "99+" : unread}
+              </div>
+            )}
           </button>
           );
         })}
@@ -978,6 +983,7 @@ export default function ChatPage() {
   const [loaded, setLoaded] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(() => new Set());
   const [onlineCount, setOnlineCount] = useState(0);
+  const [chats, setChats] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileHint, setProfileHint] = useState(
     () => localStorage.getItem(PROFILE_HINT_KEY) !== "1"
@@ -985,6 +991,7 @@ export default function ChatPage() {
   const bottomRef = useRef(null);
   const listRef = useRef(null);
   const skipSmooth = useRef(true);
+  const activeChatRef = useRef(null);
   const [historyIds, setHistoryIds] = useState(() => new Set());
   const notificationSound = useRef(null);
 
@@ -1003,6 +1010,33 @@ export default function ChatPage() {
     setRole(session.role || "user");
   };
 
+  const loadChats = () => {
+    fetch(`${API_URL}/api/conversations`, { headers: authHeaders() })
+      .then(async res => {
+        if (res.status === 401) {
+          clearSession();
+          applyAuth(null);
+          return [];
+        }
+        return res.json();
+      })
+      .then(data => setChats(Array.isArray(data) ? data : []))
+      .catch(() => setChats([]));
+  };
+
+  const markChatRead = (convId) => {
+    if (!convId) return;
+    setChats(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+    fetch(`${API_URL}/api/conversations/${convId}/read`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
   useEffect(() => {
     notificationSound.current = createNotificationSound();
     return () => {
@@ -1010,6 +1044,14 @@ export default function ChatPage() {
       notificationSound.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!username) {
+      setChats([]);
+      return;
+    }
+    loadChats();
+  }, [username]);
 
   useEffect(() => {
     if (!username) return;
@@ -1061,6 +1103,27 @@ export default function ChatPage() {
             else next.delete(data.user);
             return next;
           });
+          return;
+        }
+        if (data.type === "chat_message" && data.conversation_id) {
+          if (data.from === username) return;
+          const openId = activeChatRef.current?.id;
+          if (openId === data.conversation_id) {
+            markChatRead(data.conversation_id);
+            return;
+          }
+          setChats(prev => {
+            const idx = prev.findIndex(c => c.id === data.conversation_id);
+            if (idx === -1) {
+              loadChats();
+              return prev;
+            }
+            const updated = [...prev];
+            const cur = updated[idx];
+            updated[idx] = { ...cur, unread_count: (Number(cur.unread_count) || 0) + 1 };
+            return updated;
+          });
+          playNotification(notificationSound);
         }
       } catch (err) {
         console.error("Presence parse error:", err);
@@ -1146,6 +1209,9 @@ export default function ChatPage() {
 
         if (shouldNotify) {
           playNotification(notificationSound);
+        }
+        if (msg.from !== username && activeChat?.id) {
+          markChatRead(activeChat.id);
         }
       } catch (err) {
         console.error("WS parse error:", err);
@@ -1248,6 +1314,14 @@ export default function ChatPage() {
     setInput("");
     setEditingId(null);
     setActiveChat(chat);
+    setChats(prev => {
+      const exists = prev.some(c => c.id === chat.id);
+      if (exists) {
+        return prev.map(c => c.id === chat.id ? { ...c, unread_count: 0 } : c);
+      }
+      return [{ id: chat.id, peer: chat.peer, unread_count: 0 }, ...prev];
+    });
+    markChatRead(chat.id);
   };
 
   const closeChat = () => {
@@ -1269,6 +1343,7 @@ export default function ChatPage() {
     setActiveChat(null);
     setOnlineUsers(new Set());
     setOnlineCount(0);
+    setChats([]);
     setProfileOpen(false);
     applyAuth(null);
   };
@@ -1400,7 +1475,7 @@ export default function ChatPage() {
           </div>
 
           {!activeChat ? (
-            <ConversationsScreen onOpen={openChat} onLogout={logout} onlineUsers={onlineUsers} />
+            <ConversationsScreen onOpen={openChat} onLogout={logout} onlineUsers={onlineUsers} chats={chats} />
           ) : (
             <>
           {/* Messages */}
