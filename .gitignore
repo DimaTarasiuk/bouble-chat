@@ -3,3 +3,4 @@
 .env*
 !**/.env.example
 todo.md
+API_SPEC.md

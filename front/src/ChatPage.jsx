@@ -924,14 +924,16 @@ function AuthScreen({ onAuth, notice = "" }) {
 function ConversationsScreen({
   onOpen, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged,
   feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen, activeChatId = null,
+  statsInMain = false, listMode = "chats", onListModeChange,
 }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
-  const [listMode, setListMode] = useState("chats");
   const [cardUser, setCardUser] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+
+  const changeListMode = (mode) => onListModeChange?.(mode);
 
   useEffect(() => {
     const q = query.trim();
@@ -993,7 +995,7 @@ function ConversationsScreen({
                 key={tab.id}
                 type="button"
                 className="neu-press"
-                onClick={() => { setListMode(tab.id); setQuery(""); setError(""); }}
+                onClick={() => { changeListMode(tab.id); setQuery(""); setError(""); }}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -1051,7 +1053,13 @@ function ConversationsScreen({
 
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px 16px" }}>
         {listMode === "stats" ? (
-          <StatsPanel />
+          statsInMain ? (
+            <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24, padding: "0 12px" }}>
+              Статистика відкрита праворуч →
+            </div>
+          ) : (
+            <StatsPanel />
+          )
         ) : listMode === "news" ? (
           <AnnouncementsPanel />
         ) : listMode === "feedback" ? (
@@ -1235,7 +1243,7 @@ function ConversationsScreen({
               setFeedbackOpen(true);
               return;
             }
-            setListMode(listMode === "feedback" ? "chats" : "feedback");
+            changeListMode(listMode === "feedback" ? "chats" : "feedback");
             setQuery("");
             setError("");
           }}
@@ -1309,6 +1317,7 @@ export default function ChatPage() {
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const escapeRef = useRef(null);
+  const [sidebarMode, setSidebarMode] = useState("chats");
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const isPhone = useMediaQuery(PHONE_QUERY);
   const emojiWrapRef = useRef(null);
@@ -1326,6 +1335,7 @@ export default function ChatPage() {
       setRole("user");
       setChats([]);
       setAdminUsers([]);
+      setSidebarMode("chats");
       setOnlineUsers(new Set());
       setOnlineCount(0);
       return;
@@ -1917,6 +1927,12 @@ export default function ChatPage() {
   const showOnlineStats = isStaffRole(role);
   const isHead = isHeadRole(role);
   const headerInitials = (username || "?").slice(0, 2).toUpperCase();
+  const statsInMain = isDesktop && isHead && sidebarMode === "stats";
+
+  const changeSidebarMode = (mode) => {
+    setSidebarMode(mode);
+    if (mode === "stats" && isDesktop && activeChat) closeChat();
+  };
 
   const openUserFromAdmin = async (peer) => {
     try {
@@ -2090,6 +2106,9 @@ export default function ChatPage() {
       feedbackTick={feedbackTick}
       onFeedbackSeen={markFeedbackRead}
       activeChatId={activeChat?.id ?? null}
+      statsInMain={statsInMain}
+      listMode={isHead ? sidebarMode : "chats"}
+      onListModeChange={changeSidebarMode}
     />
   );
 
@@ -2361,7 +2380,9 @@ export default function ChatPage() {
               display: "flex", flexDirection: "column",
               position: "relative",
             }}>
-              {activeChat ? <>{chatHeader}{chatBody}</> : emptyPane}
+              {activeChat
+                ? <>{chatHeader}{chatBody}</>
+                : statsInMain ? <StatsPanel wide /> : emptyPane}
             </section>
           </div>
         ) : (

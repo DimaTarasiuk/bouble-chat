@@ -22,6 +22,7 @@ type AdminRepo interface {
 	RevokeSessions(ctx context.Context, userID int64) error
 
 	Stats(ctx context.Context, onlineUserIDs []int64) (domain.Stats, error)
+	RecentRegistrations(ctx context.Context, days, limit int) ([]domain.Registration, error)
 	InsertOnlineSnapshot(ctx context.Context, count int) error
 
 	CreateAnnouncement(ctx context.Context, createdBy int64, text string) (domain.Announcement, error)
@@ -185,6 +186,30 @@ func (r *AdminRepository) Stats(ctx context.Context, onlineUserIDs []int64) (dom
 		s.OnlineSeries = append(s.OnlineSeries, p)
 	}
 	return s, rows.Err()
+}
+
+func (r *AdminRepository) RecentRegistrations(ctx context.Context, days, limit int) ([]domain.Registration, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT username, gender, created_at
+		FROM users
+		WHERE created_at >= NOW() - make_interval(days => $1)
+		ORDER BY created_at DESC
+		LIMIT $2
+	`, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]domain.Registration, 0)
+	for rows.Next() {
+		var reg domain.Registration
+		if err := rows.Scan(&reg.Username, &reg.Gender, &reg.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, reg)
+	}
+	return out, rows.Err()
 }
 
 func (r *AdminRepository) InsertOnlineSnapshot(ctx context.Context, count int) error {
