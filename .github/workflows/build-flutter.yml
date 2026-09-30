@@ -2,7 +2,7 @@ name: Build Flutter clients
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, test_desktop]
     paths:
       - "flutter_client/**"
       - ".github/workflows/build-flutter.yml"
