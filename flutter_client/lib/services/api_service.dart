@@ -1,4 +1,8 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/auth_response.dart';
@@ -9,16 +13,38 @@ import '../utils/constants.dart';
 class ApiException implements Exception {
   final String message;
   final int? statusCode;
+  final Object? cause;
 
-  ApiException(this.message, [this.statusCode]);
+  ApiException(this.message, [this.statusCode, this.cause]);
 
   @override
-  String toString() => message;
+  String toString() {
+    final parts = <String>[message];
+    if (statusCode != null) parts.add('HTTP $statusCode');
+    if (cause != null) parts.add('$cause');
+    return parts.join(' · ');
+  }
 }
 
 class ApiService {
   final String baseUrl = AppConstants.apiUrl;
   String? _token;
+
+  ApiService() {
+    _log('ApiService ready · baseUrl=$baseUrl · wsUrl=${AppConstants.wsUrl}');
+  }
+
+  static void _log(String message, {Object? error, StackTrace? stackTrace}) {
+    developer.log(
+      message,
+      name: 'ApiService',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    // Also print so `adb logcat` / IDE console always show it in release-ish builds.
+    debugPrint('[ApiService] $message');
+    if (error != null) debugPrint('[ApiService] cause: $error');
+  }
 
   void setToken(String? token) {
     _token = token;
@@ -36,23 +62,52 @@ class ApiService {
     return headers;
   }
 
+  String _describeTransportError(Object e) {
+    if (e is SocketException) {
+      return 'SocketException: ${e.message}'
+          '${e.osError != null ? ' (os=${e.osError})' : ''}'
+          '${e.address != null ? ' host=${e.address!.host}' : ''}'
+          '${e.port != null ? ':${e.port}' : ''}';
+    }
+    if (e is HttpException) {
+      return 'HttpException: ${e.message}';
+    }
+    if (e is HandshakeException) {
+      return 'TLS/SSL HandshakeException: ${e.message}';
+    }
+    if (e is TlsException) {
+      return 'TlsException: ${e.message}';
+    }
+    if (e is FormatException) {
+      return 'FormatException (bad JSON?): ${e.message}';
+    }
+    if (e is http.ClientException) {
+      return 'ClientException: ${e.message}';
+    }
+    return '${e.runtimeType}: $e';
+  }
+
   Future<T> _handleResponse<T>(
     http.Response response,
-    T Function(Map<String, dynamic>) parser,
-  ) async {
+    T Function(Map<String, dynamic>) parser, {
+    required String label,
+  }) async {
+    _log(
+      '$label ← ${response.statusCode} '
+      'body=${response.body.length > 300 ? '${response.body.substring(0, 300)}…' : response.body}',
+    );
+
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final data = json.decode(response.body) as Map<String, dynamic>;
       return parser(data);
     }
 
-    // Handle errors
     String errorMessage = AppStrings.errorUnknown;
-    
+
     try {
       final errorData = json.decode(response.body) as Map<String, dynamic>;
       errorMessage = errorData['error'] as String? ?? errorMessage;
-      
-      // Map backend errors to user-friendly messages
+
       switch (errorMessage) {
         case 'invalid credentials':
           errorMessage = AppStrings.errorInvalidCredentials;
@@ -77,33 +132,60 @@ class ApiService {
           errorMessage = AppStrings.errorSessionRevoked;
           break;
       }
-    } catch (e) {
-      // If can't parse error, use status code
+    } catch (_) {
       if (response.statusCode == 401 || response.statusCode == 403) {
         errorMessage = AppStrings.errorSessionRevoked;
+      } else {
+        errorMessage =
+            '${AppStrings.errorNetworkError} (HTTP ${response.statusCode}, body=${response.body})';
       }
     }
 
     throw ApiException(errorMessage, response.statusCode);
   }
 
+  Future<T> _request<T>(
+    String label,
+    Future<http.Response> Function() send,
+    T Function(http.Response) onOk,
+  ) async {
+    try {
+      final response = await send().timeout(const Duration(seconds: 20));
+      return onOk(response);
+    } on ApiException {
+      rethrow;
+    } catch (e, st) {
+      final detail = _describeTransportError(e);
+      _log('$label FAILED · url base=$baseUrl · $detail', error: e, stackTrace: st);
+      throw ApiException(
+        '${AppStrings.errorNetworkError}: $detail (api=$baseUrl)',
+        null,
+        e,
+      );
+    }
+  }
+
   // Auth endpoints
   Future<AuthResponse> login(String username, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/login'),
+    final url = '$baseUrl/api/login';
+    _log('login → POST $url · user=$username');
+
+    return _request(
+      'login',
+      () => http.post(
+        Uri.parse(url),
         headers: _getHeaders(includeAuth: false),
         body: json.encode({
           'username': username,
           'password': password,
         }),
-      );
-
-      return _handleResponse(response, (data) => AuthResponse.fromJson(data));
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+      ),
+      (response) => _handleResponse(
+        response,
+        (data) => AuthResponse.fromJson(data),
+        label: 'login',
+      ),
+    );
   }
 
   Future<AuthResponse> register({
@@ -112,9 +194,13 @@ class ApiService {
     required String passwordConfirm,
     required String gender,
   }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/register'),
+    final url = '$baseUrl/api/register';
+    _log('register → POST $url · user=$username · gender=$gender');
+
+    return _request(
+      'register',
+      () => http.post(
+        Uri.parse(url),
         headers: _getHeaders(includeAuth: false),
         body: json.encode({
           'username': username,
@@ -122,116 +208,128 @@ class ApiService {
           'password_confirm': passwordConfirm,
           'gender': gender,
         }),
-      );
-
-      return _handleResponse(response, (data) => AuthResponse.fromJson(data));
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+      ),
+      (response) => _handleResponse(
+        response,
+        (data) => AuthResponse.fromJson(data),
+        label: 'register',
+      ),
+    );
   }
 
   Future<AuthResponse> getMe() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/me'),
-        headers: _getHeaders(),
-      );
+    final url = '$baseUrl/api/me';
+    _log('me → GET $url');
 
-      return _handleResponse(response, (data) => AuthResponse.fromJson(data));
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+    return _request(
+      'me',
+      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      (response) => _handleResponse(
+        response,
+        (data) => AuthResponse.fromJson(data),
+        label: 'me',
+      ),
+    );
   }
 
   // Conversations
   Future<List<Conversation>> getConversations() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/conversations'),
-        headers: _getHeaders(),
-      );
+    final url = '$baseUrl/api/conversations';
+    _log('conversations → GET $url');
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body) as List;
-        return data.map((json) => Conversation.fromJson(json as Map<String, dynamic>)).toList();
-      }
-
-      throw ApiException(AppStrings.errorNetworkError, response.statusCode);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+    return _request(
+      'conversations',
+      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      (response) {
+        _log('conversations ← ${response.statusCode}');
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body) as List;
+          return data
+              .map((json) => Conversation.fromJson(json as Map<String, dynamic>))
+              .toList();
+        }
+        throw ApiException(AppStrings.errorNetworkError, response.statusCode);
+      },
+    );
   }
 
   Future<Conversation> createConversation(String username) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/conversations'),
+    final url = '$baseUrl/api/conversations';
+    _log('createConversation → POST $url · peer=$username');
+
+    return _request(
+      'createConversation',
+      () => http.post(
+        Uri.parse(url),
         headers: _getHeaders(),
         body: json.encode({'username': username}),
-      );
-
-      return _handleResponse(response, (data) => Conversation.fromJson(data));
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+      ),
+      (response) => _handleResponse(
+        response,
+        (data) => Conversation.fromJson(data),
+        label: 'createConversation',
+      ),
+    );
   }
 
   // Messages
   Future<List<Message>> getMessages(int conversationId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/conversations/$conversationId/messages'),
-        headers: _getHeaders(),
-      );
+    final url = '$baseUrl/api/conversations/$conversationId/messages';
+    _log('messages → GET $url');
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body) as List;
-        return data.map((json) => Message.fromJson(json as Map<String, dynamic>)).toList();
-      }
-
-      throw ApiException(AppStrings.errorNetworkError, response.statusCode);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+    return _request(
+      'messages',
+      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      (response) {
+        _log('messages ← ${response.statusCode}');
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body) as List;
+          return data
+              .map((json) => Message.fromJson(json as Map<String, dynamic>))
+              .toList();
+        }
+        throw ApiException(AppStrings.errorNetworkError, response.statusCode);
+      },
+    );
   }
 
   Future<Message> sendMessage(int conversationId, String text) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/conversations/$conversationId/messages'),
+    final url = '$baseUrl/api/conversations/$conversationId/messages';
+    _log('sendMessage → POST $url');
+
+    return _request(
+      'sendMessage',
+      () => http.post(
+        Uri.parse(url),
         headers: _getHeaders(),
         body: json.encode({'text': text}),
-      );
-
-      return _handleResponse(response, (data) => Message.fromJson(data));
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+      ),
+      (response) => _handleResponse(
+        response,
+        (data) => Message.fromJson(data),
+        label: 'sendMessage',
+      ),
+    );
   }
 
   // Users
   Future<List<User>> searchUsers(String query) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/users?q=$query'),
-        headers: _getHeaders(),
-      );
+    final url = '$baseUrl/api/users?q=$query';
+    _log('searchUsers → GET $url');
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body) as List;
-        return data.map((json) => User.fromJson(json as Map<String, dynamic>)).toList();
-      }
-
-      throw ApiException(AppStrings.errorNetworkError, response.statusCode);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException(AppStrings.errorNetworkError);
-    }
+    return _request(
+      'searchUsers',
+      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      (response) {
+        _log('searchUsers ← ${response.statusCode}');
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body) as List;
+          return data
+              .map((json) => User.fromJson(json as Map<String, dynamic>))
+              .toList();
+        }
+        throw ApiException(AppStrings.errorNetworkError, response.statusCode);
+      },
+    );
   }
 }

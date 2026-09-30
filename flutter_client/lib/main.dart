@@ -13,7 +13,9 @@ import 'utils/constants.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  debugPrint('[main] API_URL=${AppConstants.apiUrl} WS_URL=${AppConstants.wsUrl}');
+
   final prefs = await SharedPreferences.getInstance();
   final apiService = ApiService();
   final wsService = WebSocketService();

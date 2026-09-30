@@ -55,13 +55,16 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      debugPrint('[AuthProvider] login start · api=${AppConstants.apiUrl} · user=$username');
       final authResponse = await _apiService.login(username, password);
       _user = authResponse.user;
       await _saveSession(authResponse.token, authResponse.user);
-      
+
+      debugPrint('[AuthProvider] login ok · user=${_user?.username} · role=${_user?.role}');
       notifyListeners();
       return true;
     } catch (e) {
+      debugPrint('[AuthProvider] login failed: $e');
       _error = e.toString();
       notifyListeners();
       return false;
@@ -78,19 +81,22 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      debugPrint('[AuthProvider] register start · api=${AppConstants.apiUrl} · user=$username');
       final authResponse = await _apiService.register(
         username: username,
         password: password,
         passwordConfirm: passwordConfirm,
         gender: gender,
       );
-      
+
       _user = authResponse.user;
       await _saveSession(authResponse.token, authResponse.user);
-      
+
+      debugPrint('[AuthProvider] register ok · user=${_user?.username}');
       notifyListeners();
       return true;
     } catch (e) {
+      debugPrint('[AuthProvider] register failed: $e');
       _error = e.toString();
       notifyListeners();
       return false;

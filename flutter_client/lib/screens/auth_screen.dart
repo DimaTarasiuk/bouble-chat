@@ -55,10 +55,22 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = false);
 
     if (!success && mounted) {
+      final msg = authProvider.error ?? AppStrings.errorUnknown;
+      debugPrint('[AuthScreen] submit failed: $msg');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(authProvider.error ?? AppStrings.errorUnknown),
+          content: Text(
+            msg,
+            maxLines: 6,
+            overflow: TextOverflow.ellipsis,
+          ),
           backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
         ),
       );
     }
@@ -106,6 +118,15 @@ class _AuthScreenState extends State<AuthScreen> {
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: AppColors.textSecondary,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'API: ${AppConstants.apiUrl}',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.textSecondary,
+                            fontFamily: 'monospace',
                           ),
                     ),
                     const SizedBox(height: 32),
