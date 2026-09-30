@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -147,11 +148,11 @@ class ApiService {
   Future<T> _request<T>(
     String label,
     Future<http.Response> Function() send,
-    T Function(http.Response) onOk,
+    FutureOr<T> Function(http.Response) onOk,
   ) async {
     try {
       final response = await send().timeout(const Duration(seconds: 20));
-      return onOk(response);
+      return await onOk(response);
     } on ApiException {
       rethrow;
     } catch (e, st) {
