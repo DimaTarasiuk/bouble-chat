@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/auth_response.dart';
 import '../models/conversation.dart';
 import '../models/user.dart';
+import '../utils/app_log.dart';
 import '../utils/constants.dart';
 
 class ApiException implements Exception {
@@ -32,19 +31,18 @@ class ApiService {
   String? _token;
 
   ApiService() {
-    _log('ApiService ready · baseUrl=$baseUrl · wsUrl=${AppConstants.wsUrl}');
+    _log(
+      'ready · baseUrl=$baseUrl · wsUrl=${AppConstants.wsUrl} · '
+      'platform=${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+    );
   }
 
   static void _log(String message, {Object? error, StackTrace? stackTrace}) {
-    developer.log(
-      message,
-      name: 'ApiService',
-      error: error,
-      stackTrace: stackTrace,
-    );
-    // Also print so `adb logcat` / IDE console always show it in release-ish builds.
-    debugPrint('[ApiService] $message');
-    if (error != null) debugPrint('[ApiService] cause: $error');
+    if (error != null || stackTrace != null) {
+      AppLog.error('Api', message, error, stackTrace);
+    } else {
+      AppLog.info('Api', message);
+    }
   }
 
   void setToken(String? token) {
@@ -93,9 +91,16 @@ class ApiService {
     T Function(Map<String, dynamic>) parser, {
     required String label,
   }) async {
+    final headersSummary = {
+      'content-type': response.headers['content-type'],
+      'server': response.headers['server'],
+      'cf-ray': response.headers['cf-ray'],
+      'rndr-id': response.headers['rndr-id'],
+    };
     _log(
       '$label ← ${response.statusCode} '
-      'body=${response.body.length > 300 ? '${response.body.substring(0, 300)}…' : response.body}',
+      'headers=$headersSummary '
+      'body=${response.body.length > 500 ? '${response.body.substring(0, 500)}…' : response.body}',
     );
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -150,14 +155,24 @@ class ApiService {
     Future<http.Response> Function() send,
     FutureOr<T> Function(http.Response) onOk,
   ) async {
+    final started = DateTime.now();
     try {
+      _log('$label · sending…');
       final response = await send().timeout(const Duration(seconds: 20));
+      final ms = DateTime.now().difference(started).inMilliseconds;
+      _log('$label · got response in ${ms}ms');
       return await onOk(response);
-    } on ApiException {
+    } on ApiException catch (e) {
+      _log('$label · ApiException: $e');
       rethrow;
     } catch (e, st) {
+      final ms = DateTime.now().difference(started).inMilliseconds;
       final detail = _describeTransportError(e);
-      _log('$label FAILED · url base=$baseUrl · $detail', error: e, stackTrace: st);
+      _log(
+        '$label FAILED after ${ms}ms · base=$baseUrl · $detail',
+        error: e,
+        stackTrace: st,
+      );
       throw ApiException(
         '${AppStrings.errorNetworkError}: $detail (api=$baseUrl)',
         null,

@@ -9,12 +9,13 @@ import 'screens/auth_screen.dart';
 import 'screens/chat_screen.dart';
 import 'services/api_service.dart';
 import 'services/websocket_service.dart';
+import 'utils/app_log.dart';
 import 'utils/constants.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  debugPrint('[main] API_URL=${AppConstants.apiUrl} WS_URL=${AppConstants.wsUrl}');
+  AppLog.info('main', 'API_URL=${AppConstants.apiUrl} WS_URL=${AppConstants.wsUrl}');
 
   final prefs = await SharedPreferences.getInstance();
   final apiService = ApiService();

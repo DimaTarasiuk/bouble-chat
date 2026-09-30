@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../utils/app_log.dart';
 import '../utils/constants.dart';
 
 class AuthProvider with ChangeNotifier {
@@ -41,8 +42,8 @@ class AuthProvider with ChangeNotifier {
         // Update token (backend returns new token with extended TTL)
         await _saveSession(authResponse.token, authResponse.user);
       }
-    } catch (e) {
-      print('Session load error: $e');
+    } catch (e, st) {
+      AppLog.error('Auth', 'session load error', e, st);
       await clearSession();
     } finally {
       _isLoading = false;
@@ -55,16 +56,16 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      debugPrint('[AuthProvider] login start · api=${AppConstants.apiUrl} · user=$username');
+      AppLog.info('Auth', 'login start · api=${AppConstants.apiUrl} · user=$username');
       final authResponse = await _apiService.login(username, password);
       _user = authResponse.user;
       await _saveSession(authResponse.token, authResponse.user);
 
-      debugPrint('[AuthProvider] login ok · user=${_user?.username} · role=${_user?.role}');
+      AppLog.info('Auth', 'login ok · user=${_user?.username} · role=${_user?.role}');
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('[AuthProvider] login failed: $e');
+    } catch (e, st) {
+      AppLog.error('Auth', 'login failed', e, st);
       _error = e.toString();
       notifyListeners();
       return false;
@@ -81,7 +82,10 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      debugPrint('[AuthProvider] register start · api=${AppConstants.apiUrl} · user=$username');
+      AppLog.info(
+        'Auth',
+        'register start · api=${AppConstants.apiUrl} · user=$username · gender=$gender',
+      );
       final authResponse = await _apiService.register(
         username: username,
         password: password,
@@ -92,11 +96,11 @@ class AuthProvider with ChangeNotifier {
       _user = authResponse.user;
       await _saveSession(authResponse.token, authResponse.user);
 
-      debugPrint('[AuthProvider] register ok · user=${_user?.username}');
+      AppLog.info('Auth', 'register ok · user=${_user?.username}');
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('[AuthProvider] register failed: $e');
+    } catch (e, st) {
+      AppLog.error('Auth', 'register failed', e, st);
       _error = e.toString();
       notifyListeners();
       return false;

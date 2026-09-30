@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
+import '../utils/app_log.dart';
 import '../utils/constants.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -14,11 +16,11 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   final _formKey = GlobalKey<FormState>();
-  
+
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  
+
   String _selectedGender = 'male';
   bool _isLoading = false;
 
@@ -30,10 +32,105 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  Future<void> _copyText(String text, {String okMessage = 'Скопійовано'}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(okMessage), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _showErrorLogDialog(String error) async {
+    final dump = StringBuffer()
+      ..writeln('=== Chat Flutter debug dump ===')
+      ..writeln('time: ${DateTime.now().toIso8601String()}')
+      ..writeln('api: ${AppConstants.apiUrl}')
+      ..writeln('ws: ${AppConstants.wsUrl}')
+      ..writeln('error: $error')
+      ..writeln()
+      ..writeln('=== logs ===')
+      ..writeln(AppLog.dump());
+
+    final text = dump.toString();
+    AppLog.info('AuthScreen', 'showing error dialog (${text.length} chars)');
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Помилка мережі / логіну'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  error,
+                  style: const TextStyle(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Повний лог:', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                Container(
+                  height: 320,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      text,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Закрити'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (ctx.mounted) {
+                  Navigator.of(ctx).pop();
+                }
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Лог скопійовано в буфер'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.copy, size: 18),
+              label: const Text('Копіювати лог'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
+    AppLog.info('AuthScreen', 'submit · mode=${_isLogin ? 'login' : 'register'}');
 
     final authProvider = context.read<AuthProvider>();
     bool success;
@@ -56,23 +153,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (!success && mounted) {
       final msg = authProvider.error ?? AppStrings.errorUnknown;
-      debugPrint('[AuthScreen] submit failed: $msg');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            msg,
-            maxLines: 6,
-            overflow: TextOverflow.ellipsis,
-          ),
-          backgroundColor: AppColors.error,
-          duration: const Duration(seconds: 8),
-          action: SnackBarAction(
-            label: 'OK',
-            textColor: Colors.white,
-            onPressed: () {},
-          ),
-        ),
-      );
+      await _showErrorLogDialog(msg);
     }
   }
 
@@ -98,7 +179,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Logo/Title
                     Icon(
                       Icons.chat_bubble_outline,
                       size: 80,
@@ -129,9 +209,18 @@ class _AuthScreenState extends State<AuthScreen> {
                             fontFamily: 'monospace',
                           ),
                     ),
-                    const SizedBox(height: 32),
-
-                    // Username
+                    TextButton(
+                      onPressed: () => _copyText(
+                        AppConstants.apiUrl,
+                        okMessage: 'API URL скопійовано',
+                      ),
+                      child: const Text('Копіювати API URL'),
+                    ),
+                    TextButton(
+                      onPressed: () => _showErrorLogDialog('(відкрито вручну)'),
+                      child: const Text('Показати / копіювати логи'),
+                    ),
+                    const SizedBox(height: 16),
                     TextFormField(
                       controller: _usernameController,
                       decoration: const InputDecoration(
@@ -147,8 +236,6 @@ class _AuthScreenState extends State<AuthScreen> {
                       },
                     ),
                     const SizedBox(height: 16),
-
-                    // Password
                     TextFormField(
                       controller: _passwordController,
                       decoration: const InputDecoration(
@@ -156,8 +243,11 @@ class _AuthScreenState extends State<AuthScreen> {
                         prefixIcon: Icon(Icons.lock_outline),
                       ),
                       obscureText: true,
-                      textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
-                      onFieldSubmitted: _isLogin ? (_) => _submit() : null,
+                      textInputAction:
+                          _isLogin ? TextInputAction.done : TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        if (_isLogin) _submit();
+                      },
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return AppStrings.errorFieldRequired;
@@ -168,10 +258,8 @@ class _AuthScreenState extends State<AuthScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 16),
-
-                    // Registration-only fields
                     if (!_isLogin) ...[
+                      const SizedBox(height: 16),
                       TextFormField(
                         controller: _confirmPasswordController,
                         decoration: const InputDecoration(
@@ -179,7 +267,6 @@ class _AuthScreenState extends State<AuthScreen> {
                           prefixIcon: Icon(Icons.lock_outline),
                         ),
                         obscureText: true,
-                        textInputAction: TextInputAction.done,
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return AppStrings.errorFieldRequired;
@@ -191,68 +278,35 @@ class _AuthScreenState extends State<AuthScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-
-                      // Gender selection
-                      DropdownButtonFormField<String>(
-                        value: _selectedGender,
-                        decoration: const InputDecoration(
-                          labelText: AppStrings.gender,
-                          prefixIcon: Icon(Icons.people_outline),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'male',
-                            child: Text(AppStrings.male),
-                          ),
-                          DropdownMenuItem(
-                            value: 'female',
-                            child: Text(AppStrings.female),
-                          ),
+                      Text(AppStrings.gender, style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 8),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'male', label: Text(AppStrings.male)),
+                          ButtonSegment(value: 'female', label: Text(AppStrings.female)),
                         ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _selectedGender = value);
-                          }
+                        selected: {_selectedGender},
+                        onSelectionChanged: (s) {
+                          setState(() => _selectedGender = s.first);
                         },
                       ),
-                      const SizedBox(height: 24),
-                    ] else
-                      const SizedBox(height: 24),
-
-                    // Submit button
+                    ],
+                    const SizedBox(height: 24),
                     ElevatedButton(
                       onPressed: _isLoading ? null : _submit,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: Theme.of(context).primaryColor,
-                        foregroundColor: Colors.white,
-                      ),
                       child: _isLoading
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : Text(
-                              _isLogin ? AppStrings.loginButton : AppStrings.registerButton,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                          : Text(_isLogin ? AppStrings.loginButton : AppStrings.registerButton),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Toggle mode
+                    const SizedBox(height: 12),
                     TextButton(
-                      onPressed: _toggleMode,
+                      onPressed: _isLoading ? null : _toggleMode,
                       child: Text(
-                        _isLogin
-                            ? AppStrings.switchToRegister
-                            : AppStrings.switchToLogin,
+                        _isLogin ? AppStrings.switchToRegister : AppStrings.switchToLogin,
                       ),
                     ),
                   ],
