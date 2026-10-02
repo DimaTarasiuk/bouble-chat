@@ -87,19 +87,18 @@ class DnsAwareHttpClient {
       final addr = await resolveHost(host);
       AppLog.info('DNS', 'connect $host → ${addr.address}:$port scheme=${uri.scheme}');
 
+      final socket = await Socket.connect(
+        addr,
+        port,
+        timeout: const Duration(seconds: 20),
+      );
       if (uri.isScheme('https')) {
-        return SecureSocket.connect(
-          addr,
-          port,
-          host: host,
-          timeout: const Duration(seconds: 20),
-        );
+        return SecureSocket.secure(socket, host: host);
       }
-      return Socket.connect(addr, port, timeout: const Duration(seconds: 20));
+      return socket;
     }
 
-    final future = open();
-    return ConnectionTask.fromSocket(future, () {});
+    return Future.value(ConnectionTask.fromSocket(open(), () {}));
   }
 
   /// Prefer system IPv4, then any system address, then DoH A records.
