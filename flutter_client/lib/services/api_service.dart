@@ -9,6 +9,7 @@ import '../models/conversation.dart';
 import '../models/user.dart';
 import '../utils/app_log.dart';
 import '../utils/constants.dart';
+import 'dns_aware_client.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -28,12 +29,14 @@ class ApiException implements Exception {
 
 class ApiService {
   final String baseUrl = AppConstants.apiUrl;
+  final http.Client _client = DnsAwareHttpClient.instance().client;
   String? _token;
 
   ApiService() {
     _log(
       'ready · baseUrl=$baseUrl · wsUrl=${AppConstants.wsUrl} · '
-      'platform=${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+      'platform=${Platform.operatingSystem} ${Platform.operatingSystemVersion} · '
+      'dnsAwareClient=on',
     );
   }
 
@@ -157,8 +160,10 @@ class ApiService {
   ) async {
     final started = DateTime.now();
     try {
+      final host = Uri.parse(baseUrl).host;
+      await DnsAwareHttpClient.diagnose(host);
       _log('$label · sending…');
-      final response = await send().timeout(const Duration(seconds: 20));
+      final response = await send().timeout(const Duration(seconds: 25));
       final ms = DateTime.now().difference(started).inMilliseconds;
       _log('$label · got response in ${ms}ms');
       return await onOk(response);
@@ -188,7 +193,7 @@ class ApiService {
 
     return _request(
       'login',
-      () => http.post(
+      () => _client.post(
         Uri.parse(url),
         headers: _getHeaders(includeAuth: false),
         body: json.encode({
@@ -215,7 +220,7 @@ class ApiService {
 
     return _request(
       'register',
-      () => http.post(
+      () => _client.post(
         Uri.parse(url),
         headers: _getHeaders(includeAuth: false),
         body: json.encode({
@@ -239,7 +244,7 @@ class ApiService {
 
     return _request(
       'me',
-      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      () => _client.get(Uri.parse(url), headers: _getHeaders()),
       (response) => _handleResponse(
         response,
         (data) => AuthResponse.fromJson(data),
@@ -255,7 +260,7 @@ class ApiService {
 
     return _request(
       'conversations',
-      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      () => _client.get(Uri.parse(url), headers: _getHeaders()),
       (response) {
         _log('conversations ← ${response.statusCode}');
         if (response.statusCode == 200) {
@@ -275,7 +280,7 @@ class ApiService {
 
     return _request(
       'createConversation',
-      () => http.post(
+      () => _client.post(
         Uri.parse(url),
         headers: _getHeaders(),
         body: json.encode({'username': username}),
@@ -295,7 +300,7 @@ class ApiService {
 
     return _request(
       'messages',
-      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      () => _client.get(Uri.parse(url), headers: _getHeaders()),
       (response) {
         _log('messages ← ${response.statusCode}');
         if (response.statusCode == 200) {
@@ -315,7 +320,7 @@ class ApiService {
 
     return _request(
       'sendMessage',
-      () => http.post(
+      () => _client.post(
         Uri.parse(url),
         headers: _getHeaders(),
         body: json.encode({'text': text}),
@@ -335,7 +340,7 @@ class ApiService {
 
     return _request(
       'searchUsers',
-      () => http.get(Uri.parse(url), headers: _getHeaders()),
+      () => _client.get(Uri.parse(url), headers: _getHeaders()),
       (response) {
         _log('searchUsers ← ${response.statusCode}');
         if (response.statusCode == 200) {

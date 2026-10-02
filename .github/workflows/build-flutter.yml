@@ -1,141 +1,127 @@
-name: Build Flutter clients
+name: Build APK and Desktop
 
 on:
   push:
-    branches: [main, master, test_desktop]
-    paths:
-      - "flutter_client/**"
-      - ".github/workflows/build-flutter.yml"
-  workflow_dispatch:
-    inputs:
-      api_url:
-        description: "Backend API URL baked into the builds (--dart-define=API_URL)"
-        required: true
-        default: "https://bouble-chat.onrender.com"
+    branches: [ main, master ]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 
-env:
-  # Prefer manual input, then repo variable FLUTTER_API_URL, else localhost
-  API_URL: ${{ github.event.inputs.api_url || vars.FLUTTER_API_URL || 'https://bouble-chat.onrender.com' }}
-
 jobs:
   android:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: flutter_client
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          cache: true
+          channel: 'stable'
 
-      - name: Remove stale platform/build folders
+      - name: Remove any pre-existing platform folders
         run: rm -rf android build
 
       - name: Generate Android platform files
-        run: flutter create --project-name chat_flutter --org com.example --platforms=android .
+        run: flutter create --project-name login_app --org com.example --platforms=android .
 
-      - name: Allow cleartext HTTP (TEMP until backend has HTTPS)
+      - name: Add Internet permission
         run: |
-          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' \
-            android/app/src/main/AndroidManifest.xml
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
+
+      - name: Check Android Manifest
+        run: |
+          echo "===== AndroidManifest.xml ====="
+          cat android/app/src/main/AndroidManifest.xml
+          echo "===== INTERNET permission ====="
+          if grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml; then
+            echo "INTERNET permission FOUND"
+          else
+            echo "INTERNET permission NOT FOUND"
+            exit 1
+          fi
+
+      - name: Allow cleartext HTTP traffic
+        run: |
+          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }}
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
-          path: flutter_client/build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
 
   windows:
     runs-on: windows-2022
-    defaults:
-      run:
-        working-directory: flutter_client
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          cache: true
+          channel: 'stable'
 
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
-      - name: Remove stale platform/build folders
-        shell: pwsh
+      - name: Remove any pre-existing platform folders
         run: |
           Remove-Item -Recurse -Force windows -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
 
-      - name: Generate Windows platform files
-        run: flutter create --project-name chat_flutter --org com.example --platforms=windows .
+      - name: Generate platform files
+        run: flutter create --project-name login_app --org com.example --platforms=windows .
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Show Flutter diagnostics
+      - name: Show Flutter/Visual Studio diagnostics
         run: flutter doctor -v
 
-      - name: Build Windows
-        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }}
+      - name: Build Windows exe
+        run: flutter build windows --release
 
       - name: Zip the build
-        shell: pwsh
         run: |
-          Compress-Archive -Path build/windows/x64/runner/Release/* `
-            -DestinationPath "$env:GITHUB_WORKSPACE/chat_flutter-windows.zip"
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath login_app-windows.zip
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: app-release-windows
-          path: chat_flutter-windows.zip
+          path: login_app-windows.zip
 
   macos:
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: flutter_client
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          cache: true
+          channel: 'stable'
 
       - name: Enable macOS desktop support
         run: flutter config --enable-macos-desktop
 
-      - name: Remove stale platform/build folders
+      - name: Remove any pre-existing platform folders
         run: rm -rf macos build
 
-      - name: Generate macOS platform files
-        run: flutter create --project-name chat_flutter --org com.example --platforms=macos .
+      - name: Generate platform files
+        run: flutter create --project-name login_app --org com.example --platforms=macos .
 
-      - name: Allow cleartext HTTP (TEMP until backend has HTTPS)
+      - name: Allow cleartext HTTP traffic
         run: |
-          plutil -replace NSAppTransportSecurity -xml \
-            '<dict><key>NSAllowsArbitraryLoads</key><true/></dict>' \
-            macos/Runner/Info.plist
+          plutil -replace NSAppTransportSecurity -xml '<dict><key>NSAllowsArbitraryLoads</key><true/></dict>' macos/Runner/Info.plist
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build macOS
-        run: flutter build macos --release --dart-define=API_URL=${{ env.API_URL }}
+      - name: Build macOS app
+        run: flutter build macos --release
 
       - name: Ad-hoc code sign
         run: |
@@ -147,13 +133,13 @@ jobs:
         run: |
           cd build/macos/Build/Products/Release
           APP_NAME=$(find . -maxdepth 1 -name "*.app" -exec basename {} \;)
-          ditto -c -k --keepParent "$APP_NAME" "$GITHUB_WORKSPACE/chat_flutter-macos.zip"
+          ditto -c -k --keepParent "$APP_NAME" ../../../../../login_app-macos.zip
 
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
           name: app-release-macos
-          path: chat_flutter-macos.zip
+          path: login_app-macos.zip
 
   release:
     needs: [android, windows, macos]
@@ -167,23 +153,13 @@ jobs:
       - name: Flatten into one folder
         run: |
           mkdir -p release-files
-          cp artifacts/app-release-apk/app-release.apk \
-             release-files/chat_flutter-android.apk
-          cp artifacts/app-release-windows/chat_flutter-windows.zip \
-             release-files/
-          cp artifacts/app-release-macos/chat_flutter-macos.zip \
-             release-files/
-          ls -la release-files
+          cp artifacts/app-release-apk/app-release.apk release-files/
+          cp artifacts/app-release-windows/login_app-windows.zip release-files/
+          cp artifacts/app-release-macos/login_app-macos.zip release-files/
 
-      - name: Publish (or update) the flutter-latest release
+      - name: Publish (or update) the "latest" release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: flutter-latest
-          name: Flutter clients (latest)
-          body: |
-            Auto-built Flutter clients (Android APK, Windows, macOS).
-
-            API URL is baked in at build time via `--dart-define=API_URL`.
-            Override with workflow_dispatch input or repo variable `FLUTTER_API_URL`.
+          tag_name: latest
+          name: Latest build
           files: release-files/*
-          make_latest: true
