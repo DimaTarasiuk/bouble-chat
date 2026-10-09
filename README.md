@@ -1,6 +1,6 @@
 # Chat App
 
-Real-time chat application built with Go backend and React frontend.
+Real-time chat application built with Go backend, React web frontend, and Flutter cross-platform client.
 
 ## Stack
 
@@ -15,7 +15,8 @@ Real-time chat application built with Go backend and React frontend.
 - golang.org/x/crypto/bcrypt — password hashing
 
 **Frontend**
-- React + Vite
+- React + Vite (Web)
+- Flutter (Android, iOS, macOS, Windows, Linux)
 
 **Infrastructure**
 - PostgreSQL 16 (Docker, local)
@@ -39,7 +40,14 @@ chat/
 │   ├── db/migrations/     # SQL migrations
 │   ├── docker-compose.yml
 │   └── Makefile
-└── front/                 # React frontend
+├── front/                 # React web frontend
+└── flutter_client/        # Flutter cross-platform client
+    ├── lib/               # Dart source code
+    ├── android/           # Android-specific files
+    ├── ios/               # iOS-specific files
+    ├── macos/             # macOS-specific files
+    ├── windows/           # Windows-specific files
+    └── linux/             # Linux-specific files
 ```
 
 ## Auth
@@ -110,6 +118,7 @@ make run
 
 **5. Start the frontend**
 
+### Web (React):
 ```bash
 cd front
 npm install
@@ -117,6 +126,15 @@ npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173)
+
+### Mobile/Desktop (Flutter):
+```bash
+cd flutter_client
+flutter pub get
+flutter run
+```
+
+See [flutter_client/README.md](flutter_client/README.md) for detailed Flutter setup instructions.
 
 ## Deploy: Render + Neon
 
@@ -296,6 +314,43 @@ Response `201`:
 ```
 
 `from` comes from the token.
+
+## Flutter Client
+
+A complete cross-platform Flutter client is now available in the `flutter_client/` directory!
+
+### Supported Platforms
+- ✅ Android (phones & tablets)
+- ✅ iOS (iPhone & iPad)
+- ✅ macOS (desktop)
+- ✅ Windows (desktop)
+- ✅ Linux (desktop)
+- ✅ Web (experimental)
+
+### Quick Start
+```bash
+cd flutter_client
+flutter pub get
+flutter run
+```
+
+### Documentation
+- [Full README](flutter_client/README.md) - Complete documentation
+- [Quick Start](flutter_client/QUICKSTART.md) - 5-minute setup guide
+- [Getting Started](flutter_client/GETTING_STARTED.md) - Beginner-friendly guide
+- [Architecture](flutter_client/ARCHITECTURE.md) - Technical details
+- [React vs Flutter](FLUTTER_VS_REACT.md) - Comparison guide
+
+### Features
+- Full authentication (login/register)
+- Real-time messaging via WebSocket
+- User presence tracking (online/offline)
+- Private 1:1 conversations
+- User search functionality
+- Material Design 3 UI
+- Cross-platform from single codebase
+
+See [flutter_client/README.md](flutter_client/README.md) for detailed setup instructions.
 
 ## Makefile Commands
 

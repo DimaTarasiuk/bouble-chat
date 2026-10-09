@@ -42,6 +42,12 @@ type Stats struct {
 	OnlineSeries  []OnlinePoint `json:"online_series"`
 }
 
+type Registration struct {
+	Username  string    `json:"username"`
+	Gender    string    `json:"gender"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type UserCard struct {
 	User
 	Online        bool `json:"online"`

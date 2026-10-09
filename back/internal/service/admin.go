@@ -94,6 +94,15 @@ func (s *AdminService) Stats(ctx context.Context, onlineUserIDs []int64) (domain
 	return s.admin.Stats(ctx, onlineUserIDs)
 }
 
+const (
+	registrationsDays  = 30
+	registrationsLimit = 1000
+)
+
+func (s *AdminService) RecentRegistrations(ctx context.Context) ([]domain.Registration, error) {
+	return s.admin.RecentRegistrations(ctx, registrationsDays, registrationsLimit)
+}
+
 func (s *AdminService) RecordOnline(ctx context.Context, count int) error {
 	return s.admin.InsertOnlineSnapshot(ctx, count)
 }

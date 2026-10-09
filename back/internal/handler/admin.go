@@ -106,6 +106,15 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (h *AdminHandler) Registrations(w http.ResponseWriter, r *http.Request) {
+	regs, err := h.svc.RecentRegistrations(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, regs)
+}
+
 type announcementRequest struct {
 	Text string `json:"text"`
 }

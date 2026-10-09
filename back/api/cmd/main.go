@@ -115,6 +115,7 @@ func main() {
 			r.Post("/users/{username}/unban", adminH.Unban)
 			r.Post("/users/{username}/kick", adminH.Kick)
 			r.Get("/stats", adminH.Stats)
+			r.Get("/registrations", adminH.Registrations)
 			r.Get("/announcements", adminH.ListAnnouncements)
 			r.Post("/announcements", adminH.CreateAnnouncement)
 			r.Get("/feedback", adminH.ListFeedback)
