@@ -7,6 +7,7 @@ import {
   neu,
   onlineColor,
   ONLINE_OFF_TEXT,
+  NAME_ABBR,
 } from "../shared.js";
 import { Avatar, NeuField } from "../ui.jsx";
 
@@ -169,7 +170,7 @@ export default function UserCard({ username, online, onClose, onOpenChat, onChan
         {card && (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Avatar initials={card.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+              <Avatar initials={card.username.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563" }}>
                   {card.username}

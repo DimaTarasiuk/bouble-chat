@@ -35,8 +35,11 @@ export const clearSession = () => {
 
 export const ONLINE_OFF = "#c5cad3";
 export const ONLINE_OFF_TEXT = "#9ca3af";
+export const ONLINE_DOT_SHADOW = "rgb(224, 229, 236) 0px 0px 0px 1px";
+export const NAME_ABBR = "rgb(224, 27, 119)";
+export const NOTIFY_BADGE = "rgb(220 43 126 / 87%)";
 export const onlineColor = (gender) => {
-  if (gender === "male") return "#60a5fa";
+  if (gender === "male") return "rgb(31 131 255 / 93%)";
   if (gender === "female") return "#f9a8d4";
   return "#86efac";
 };

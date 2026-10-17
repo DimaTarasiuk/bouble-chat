@@ -12,6 +12,9 @@ import {
   clearSession,
   ONLINE_OFF,
   ONLINE_OFF_TEXT,
+  ONLINE_DOT_SHADOW,
+  NAME_ABBR,
+  NOTIFY_BADGE,
   onlineColor,
   formatDateTime,
   NEU_BG,
@@ -309,7 +312,7 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
       position: "relative",
       ...(animate ? { animation: "fadeUp 0.25s ease both" } : {}),
     }}>
-      {!isMe && <Avatar initials={initials} color="#c084a0" />}
+      {!isMe && <Avatar initials={initials} color={NAME_ABBR} />}
 
       <div
         style={{
@@ -387,7 +390,7 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
         </span>
       </div>
 
-      {isMe && <Avatar initials={initials} color="#6b8fb5" />}
+      {isMe && <Avatar initials={initials} color={NAME_ABBR} />}
     </div>
   );
 }
@@ -581,7 +584,7 @@ function ProfileCard({ onClose, onSaved }) {
                   border: "none", background: NEU_BG,
                   boxShadow: neu(false, 6, 12),
                   cursor: "pointer",
-                  fontSize: 22, fontWeight: 800, color: "#c084a0",
+                  fontSize: 22, fontWeight: 800, color: NAME_ABBR,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
@@ -1094,12 +1097,12 @@ function ConversationsScreen({
                 }}
               >
                 <div style={{ position: "relative" }}>
-                  <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+                  <Avatar initials={u.username.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
                   <div style={{
                     position: "absolute", bottom: 0, right: 0,
                     width: 9, height: 9, borderRadius: "50%",
                     background: isOnline ? onCol : ONLINE_OFF,
-                    boxShadow: `0 0 0 2px ${NEU_BG}`,
+                    boxShadow: ONLINE_DOT_SHADOW,
                   }}/>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1149,12 +1152,12 @@ function ConversationsScreen({
               }}
             >
               <div style={{ position: "relative" }}>
-                <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+                <Avatar initials={u.username.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
                 <div style={{
                   position: "absolute", bottom: 0, right: 0,
                   width: 9, height: 9, borderRadius: "50%",
                   background: isOnline ? onCol : ONLINE_OFF,
-                  boxShadow: `0 0 0 2px ${NEU_BG}`,
+                  boxShadow: ONLINE_DOT_SHADOW,
                 }}/>
               </div>
               <div>
@@ -1197,12 +1200,12 @@ function ConversationsScreen({
             }}
           >
             <div style={{ position: "relative" }}>
-              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
               <div style={{
                 position: "absolute", bottom: 0, right: 0,
                 width: 9, height: 9, borderRadius: "50%",
                 background: isOnline ? onCol : ONLINE_OFF,
-                boxShadow: `0 0 0 2px ${NEU_BG}`,
+                boxShadow: ONLINE_DOT_SHADOW,
               }}/>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1217,7 +1220,7 @@ function ConversationsScreen({
                 height: 22,
                 padding: "0 7px",
                 borderRadius: 50,
-                background: "#c084a0",
+                background: NOTIFY_BADGE,
                 color: "#fff",
                 fontSize: 11,
                 fontWeight: 800,
@@ -1268,7 +1271,7 @@ function ConversationsScreen({
               height: 15,
               padding: "0 4px",
               borderRadius: 50,
-              background: "#c084a0",
+              background: NOTIFY_BADGE,
               color: "#fff",
               fontSize: 9,
               fontWeight: 800,
@@ -2007,7 +2010,7 @@ export default function ChatPage() {
           boxShadow: neu(false, 4, 8),
           cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, fontWeight: 800, color: "#c084a0",
+          fontSize: 14, fontWeight: 800, color: NAME_ABBR,
           fontFamily: "'Nunito', sans-serif",
           padding: 0,
           flexShrink: 0,
@@ -2018,12 +2021,12 @@ export default function ChatPage() {
           position: "absolute", bottom: 1, right: 1,
           width: 10, height: 10, borderRadius: "50%",
           background: onlineUsers.has(username) ? myOnlineColor : ONLINE_OFF,
-          boxShadow: `0 0 0 2px ${NEU_BG}`,
+          boxShadow: ONLINE_DOT_SHADOW,
         }}/>
       </button>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-          <span style={{ color: "#868e99" }}>Bouble</span> Chat
+          Booblify
         </div>
         <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
           {showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати"}
@@ -2041,12 +2044,12 @@ export default function ChatPage() {
     }}>
       {isDesktop ? (
         <div style={{ position: "relative", flexShrink: 0 }}>
-          <Avatar initials={activeChat.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+          <Avatar initials={activeChat.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
           <div style={{
             position: "absolute", bottom: 0, right: 0,
             width: 9, height: 9, borderRadius: "50%",
             background: peerOnline ? peerOnlineColor : ONLINE_OFF,
-            boxShadow: `0 0 0 2px ${NEU_BG}`,
+            boxShadow: ONLINE_DOT_SHADOW,
           }}/>
         </div>
       ) : (
