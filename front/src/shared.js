@@ -41,7 +41,7 @@ export const NOTIFY_BADGE = "rgb(220 43 126 / 87%)";
 export const onlineColor = (gender) => {
   if (gender === "male") return "rgb(31 131 255 / 93%)";
   if (gender === "female") return "#f9a8d4";
-  return "#86efac";
+  return "rgb(38 181 90)";
 };
 
 export const formatDateTime = (iso, fallback = "") => {

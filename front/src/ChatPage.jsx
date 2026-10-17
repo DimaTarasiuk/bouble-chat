@@ -144,6 +144,55 @@ function AppStyles() {
       .profile-hint-pulse {
         animation: profileHintPulse 1.35s ease-in-out infinite;
       }
+      @keyframes booblifyShine {
+        from { background-position: 0% 50%; }
+        to   { background-position: 300% 50%; }
+      }
+      @keyframes booblifyWave {
+        0%, 55%, 100% { transform: translateY(0) scale(1); }
+        22% { transform: translateY(-2.5px) scale(1.18); }
+        38% { transform: translateY(0.5px) scale(0.97); }
+      }
+      .booblify-logo {
+        display: inline-flex;
+        align-items: baseline;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        line-height: 1.35;
+      }
+      .booblify-letter {
+        display: inline-block;
+        transform-origin: 50% 70%;
+        background: linear-gradient(
+          100deg,
+          #5b7399 0%,
+          #6b8fb5 20%,
+          #9a8bb8 36%,
+          #c084a0 50%,
+          #e01b77 60%,
+          #ff9ec4 66%,
+          #c084a0 76%,
+          #6b8fb5 90%,
+          #5b7399 100%
+        );
+        background-size: 300% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 2px rgba(107, 143, 181, 0.35));
+        animation:
+          booblifyShine 4.5s linear infinite,
+          booblifyWave 3.2s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .booblify-letter {
+          animation: none;
+          background-position: 0% 50%;
+          transform: none;
+        }
+      }
       .neu-press {
         transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
         -webkit-tap-highlight-color: transparent;
@@ -161,6 +210,25 @@ function AppStyles() {
         opacity: 0.65;
       }
     `}</style>
+  );
+}
+
+const BOOBLIFY = "Booblify";
+
+function BooblifyLogo() {
+  return (
+    <span className="booblify-logo" aria-label={BOOBLIFY}>
+      {BOOBLIFY.split("").map((ch, i) => (
+        <span
+          key={`${ch}${i}`}
+          className="booblify-letter"
+          style={{ animationDelay: `${-i * 0.18}s, ${i * 0.12}s` }}
+          aria-hidden="true"
+        >
+          {ch}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -2025,9 +2093,7 @@ export default function ChatPage() {
         }}/>
       </button>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-          Booblify
-        </div>
+        <div><BooblifyLogo /></div>
         <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
           {showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати"}
         </div>
