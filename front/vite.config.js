@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'app-icon.svg'],
       manifest: {
-        name: 'Bouble Chat',
-        short_name: 'Bouble',
+        name: 'Booblify',
+        short_name: 'Booblify',
         description: 'Real-time chat',
         theme_color: '#e0e5ec',
         background_color: '#e0e5ec',

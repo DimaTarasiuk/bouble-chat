@@ -12,6 +12,9 @@ import {
   clearSession,
   ONLINE_OFF,
   ONLINE_OFF_TEXT,
+  ONLINE_DOT_SHADOW,
+  NAME_ABBR,
+  NOTIFY_BADGE,
   onlineColor,
   formatDateTime,
   NEU_BG,
@@ -141,6 +144,55 @@ function AppStyles() {
       .profile-hint-pulse {
         animation: profileHintPulse 1.35s ease-in-out infinite;
       }
+      @keyframes booblifyShine {
+        from { background-position: 0% 50%; }
+        to   { background-position: 300% 50%; }
+      }
+      @keyframes booblifyWave {
+        0%, 55%, 100% { transform: translateY(0) scale(1); }
+        22% { transform: translateY(-2.5px) scale(1.18); }
+        38% { transform: translateY(0.5px) scale(0.97); }
+      }
+      .booblify-logo {
+        display: inline-flex;
+        align-items: baseline;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        line-height: 1.35;
+      }
+      .booblify-letter {
+        display: inline-block;
+        transform-origin: 50% 70%;
+        background: linear-gradient(
+          100deg,
+          #5b7399 0%,
+          #6b8fb5 20%,
+          #9a8bb8 36%,
+          #c084a0 50%,
+          #e01b77 60%,
+          #ff9ec4 66%,
+          #c084a0 76%,
+          #6b8fb5 90%,
+          #5b7399 100%
+        );
+        background-size: 300% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 2px rgba(107, 143, 181, 0.35));
+        animation:
+          booblifyShine 4.5s linear infinite,
+          booblifyWave 3.2s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .booblify-letter {
+          animation: none;
+          background-position: 0% 50%;
+          transform: none;
+        }
+      }
       .neu-press {
         transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
         -webkit-tap-highlight-color: transparent;
@@ -158,6 +210,25 @@ function AppStyles() {
         opacity: 0.65;
       }
     `}</style>
+  );
+}
+
+const BOOBLIFY = "Booblify";
+
+function BooblifyLogo() {
+  return (
+    <span className="booblify-logo" aria-label={BOOBLIFY}>
+      {BOOBLIFY.split("").map((ch, i) => (
+        <span
+          key={`${ch}${i}`}
+          className="booblify-letter"
+          style={{ animationDelay: `${-i * 0.18}s, ${i * 0.12}s` }}
+          aria-hidden="true"
+        >
+          {ch}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -309,7 +380,7 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
       position: "relative",
       ...(animate ? { animation: "fadeUp 0.25s ease both" } : {}),
     }}>
-      {!isMe && <Avatar initials={initials} color="#c084a0" />}
+      {!isMe && <Avatar initials={initials} color={NAME_ABBR} />}
 
       <div
         style={{
@@ -387,7 +458,7 @@ function Bubble({ msg, username, animate = false, onEdit, onReply }) {
         </span>
       </div>
 
-      {isMe && <Avatar initials={initials} color="#6b8fb5" />}
+      {isMe && <Avatar initials={initials} color={NAME_ABBR} />}
     </div>
   );
 }
@@ -581,7 +652,7 @@ function ProfileCard({ onClose, onSaved }) {
                   border: "none", background: NEU_BG,
                   boxShadow: neu(false, 6, 12),
                   cursor: "pointer",
-                  fontSize: 22, fontWeight: 800, color: "#c084a0",
+                  fontSize: 22, fontWeight: 800, color: NAME_ABBR,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
@@ -1094,12 +1165,12 @@ function ConversationsScreen({
                 }}
               >
                 <div style={{ position: "relative" }}>
-                  <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+                  <Avatar initials={u.username.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
                   <div style={{
                     position: "absolute", bottom: 0, right: 0,
                     width: 9, height: 9, borderRadius: "50%",
                     background: isOnline ? onCol : ONLINE_OFF,
-                    boxShadow: `0 0 0 2px ${NEU_BG}`,
+                    boxShadow: ONLINE_DOT_SHADOW,
                   }}/>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1149,12 +1220,12 @@ function ConversationsScreen({
               }}
             >
               <div style={{ position: "relative" }}>
-                <Avatar initials={u.username.slice(0, 2).toUpperCase()} color="#6b8fb5" />
+                <Avatar initials={u.username.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
                 <div style={{
                   position: "absolute", bottom: 0, right: 0,
                   width: 9, height: 9, borderRadius: "50%",
                   background: isOnline ? onCol : ONLINE_OFF,
-                  boxShadow: `0 0 0 2px ${NEU_BG}`,
+                  boxShadow: ONLINE_DOT_SHADOW,
                 }}/>
               </div>
               <div>
@@ -1197,12 +1268,12 @@ function ConversationsScreen({
             }}
           >
             <div style={{ position: "relative" }}>
-              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
               <div style={{
                 position: "absolute", bottom: 0, right: 0,
                 width: 9, height: 9, borderRadius: "50%",
                 background: isOnline ? onCol : ONLINE_OFF,
-                boxShadow: `0 0 0 2px ${NEU_BG}`,
+                boxShadow: ONLINE_DOT_SHADOW,
               }}/>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1217,7 +1288,7 @@ function ConversationsScreen({
                 height: 22,
                 padding: "0 7px",
                 borderRadius: 50,
-                background: "#c084a0",
+                background: NOTIFY_BADGE,
                 color: "#fff",
                 fontSize: 11,
                 fontWeight: 800,
@@ -1268,7 +1339,7 @@ function ConversationsScreen({
               height: 15,
               padding: "0 4px",
               borderRadius: 50,
-              background: "#c084a0",
+              background: NOTIFY_BADGE,
               color: "#fff",
               fontSize: 9,
               fontWeight: 800,
@@ -2007,7 +2078,7 @@ export default function ChatPage() {
           boxShadow: neu(false, 4, 8),
           cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, fontWeight: 800, color: "#c084a0",
+          fontSize: 14, fontWeight: 800, color: NAME_ABBR,
           fontFamily: "'Nunito', sans-serif",
           padding: 0,
           flexShrink: 0,
@@ -2018,13 +2089,11 @@ export default function ChatPage() {
           position: "absolute", bottom: 1, right: 1,
           width: 10, height: 10, borderRadius: "50%",
           background: onlineUsers.has(username) ? myOnlineColor : ONLINE_OFF,
-          boxShadow: `0 0 0 2px ${NEU_BG}`,
+          boxShadow: ONLINE_DOT_SHADOW,
         }}/>
       </button>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>
-          <span style={{ color: "#868e99" }}>Bouble</span> Chat
-        </div>
+        <div><BooblifyLogo /></div>
         <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
           {showOnlineStats ? `Онлайн зараз: ${onlineCount}` : "Приватні чати"}
         </div>
@@ -2041,12 +2110,12 @@ export default function ChatPage() {
     }}>
       {isDesktop ? (
         <div style={{ position: "relative", flexShrink: 0 }}>
-          <Avatar initials={activeChat.peer.slice(0, 2).toUpperCase()} color="#c084a0" />
+          <Avatar initials={activeChat.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
           <div style={{
             position: "absolute", bottom: 0, right: 0,
             width: 9, height: 9, borderRadius: "50%",
             background: peerOnline ? peerOnlineColor : ONLINE_OFF,
-            boxShadow: `0 0 0 2px ${NEU_BG}`,
+            boxShadow: ONLINE_DOT_SHADOW,
           }}/>
         </div>
       ) : (
