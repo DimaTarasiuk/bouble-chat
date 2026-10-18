@@ -193,6 +193,61 @@ function AppStyles() {
           transform: none;
         }
       }
+      @keyframes badgeIn {
+        0%   { transform: scale(0); opacity: 0; }
+        60%  { transform: scale(1.3); opacity: 1; }
+        80%  { transform: scale(0.92); }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      @keyframes badgePop {
+        0%   { transform: scale(1) rotate(0deg); }
+        25%  { transform: scale(1.5) rotate(-10deg); }
+        45%  { transform: scale(0.88) rotate(7deg); }
+        65%  { transform: scale(1.14) rotate(-3deg); }
+        100% { transform: scale(1) rotate(0deg); }
+      }
+      @keyframes badgeRing {
+        0%   { transform: scale(1); opacity: 0.65; }
+        100% { transform: scale(2.3); opacity: 0; }
+      }
+      @keyframes badgeNum {
+        0%   { transform: translateY(70%); opacity: 0; }
+        100% { transform: translateY(0); opacity: 1; }
+      }
+      .unread-badge {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        border-radius: 50px;
+        color: #fff;
+        font-weight: 800;
+        animation: badgeIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+      }
+      .unread-badge.pop {
+        animation: badgePop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+      }
+      .unread-badge-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50px;
+        pointer-events: none;
+        opacity: 0;
+      }
+      .unread-badge.pop .unread-badge-ring {
+        animation: badgeRing 0.75s ease-out both;
+      }
+      .unread-badge-num {
+        display: inline-block;
+        animation: badgeNum 0.3s ease-out both;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .unread-badge, .unread-badge.pop, .unread-badge-num,
+        .unread-badge.pop .unread-badge-ring {
+          animation: none;
+        }
+      }
       .neu-press {
         transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
         -webkit-tap-highlight-color: transparent;
@@ -215,9 +270,13 @@ function AppStyles() {
 
 const BOOBLIFY = "Booblify";
 
-function BooblifyLogo() {
+function BooblifyLogo({ size } = {}) {
   return (
-    <span className="booblify-logo" aria-label={BOOBLIFY}>
+    <span
+      className="booblify-logo"
+      aria-label={BOOBLIFY}
+      style={size ? { fontSize: size } : undefined}
+    >
       {BOOBLIFY.split("").map((ch, i) => (
         <span
           key={`${ch}${i}`}
@@ -228,6 +287,33 @@ function BooblifyLogo() {
           {ch}
         </span>
       ))}
+    </span>
+  );
+}
+
+// Pink unread counter. Pops (with a ripple ring) every time the count grows;
+// the number itself slides in on any change.
+function UnreadBadge({ count, small = false }) {
+  const [prevCount, setPrevCount] = useState(count);
+  const [pulse, setPulse] = useState(0);
+  if (count !== prevCount) {
+    setPrevCount(count);
+    if (count > prevCount) setPulse((p) => p + 1);
+  }
+
+  const label = count > 99 ? "99+" : count;
+  const sizing = small
+    ? { minWidth: 15, height: 15, padding: "0 4px", fontSize: 9 }
+    : { minWidth: 22, height: 22, padding: "0 7px", fontSize: 11, boxShadow: neu(false, 2, 4) };
+
+  return (
+    <span
+      key={pulse}
+      className={`unread-badge${pulse > 0 ? " pop" : ""}`}
+      style={{ background: NOTIFY_BADGE, ...sizing }}
+    >
+      <span className="unread-badge-ring" style={{ background: NOTIFY_BADGE }} aria-hidden="true" />
+      <span key={label} className="unread-badge-num">{label}</span>
     </span>
   );
 }
@@ -861,15 +947,7 @@ function AuthScreen({ onAuth, notice = "" }) {
         padding: "40px 32px",
         display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
       }}>
-        <div style={{
-          width: 72, height: 72, borderRadius: "50%",
-          background: NEU_BG,
-          boxShadow: neu(false, 6, 12),
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 28,
-        }}>
-          👤
-        </div>
+        <BooblifyLogo size={28} />
 
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: "#4b5563" }}>
@@ -1282,25 +1360,7 @@ function ConversationsScreen({
                 {isOnline ? "● Online" : "Offline"}
               </div>
             </div>
-            {unread > 0 && (
-              <div style={{
-                minWidth: 22,
-                height: 22,
-                padding: "0 7px",
-                borderRadius: 50,
-                background: NOTIFY_BADGE,
-                color: "#fff",
-                fontSize: 11,
-                fontWeight: 800,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                boxShadow: neu(false, 2, 4),
-              }}>
-                {unread > 99 ? "99+" : unread}
-              </div>
-            )}
+            {unread > 0 && <UnreadBadge count={unread} />}
           </button>
           );
         })}
@@ -1334,20 +1394,7 @@ function ConversationsScreen({
         >
           {isHead ? (listMode === "feedback" ? "← back" : "feedbacks") : "feedback"}
           {isHead && listMode !== "feedback" && feedbackUnread > 0 && (
-            <span style={{
-              minWidth: 15,
-              height: 15,
-              padding: "0 4px",
-              borderRadius: 50,
-              background: NOTIFY_BADGE,
-              color: "#fff",
-              fontSize: 9,
-              fontWeight: 800,
-              lineHeight: "15px",
-              textAlign: "center",
-            }}>
-              {feedbackUnread > 99 ? "99+" : feedbackUnread}
-            </span>
+            <UnreadBadge count={feedbackUnread} small />
           )}
         </button>
       </div>
