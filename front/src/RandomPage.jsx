@@ -72,17 +72,17 @@ const genderSign = (gender) => (gender === "female" ? "♀" : "♂");
 const genderLabel = (gender) => (gender === "female" ? "Вона" : "Він");
 
 const MALE_NICKS = [
-  "Рандомний кіт", "Милий кіт", "Няшний кіт", "Дворовий кіт",
+  "рандомним котом", "милим котом", "няшним котом", "дворовим котом",
 ];
 
 const FEMALE_NICKS = [
-  "Рандомна кицька", "Мила кицька", "Няшна кицька", "Дворова кицька",
+  "рандомною кицькою", "милою кицькою", "няшною кицькою", "дворовою кицькою",
 ];
 
 function peerNick(session) {
   const list = session.peer_gender === "female" ? FEMALE_NICKS : MALE_NICKS;
   const id = Number(session.id) || 0;
-  return list[Math.abs(id) % list.length];
+  return `Чат з ${list[Math.abs(id) % list.length]}`;
 }
 
 function loadForm() {
