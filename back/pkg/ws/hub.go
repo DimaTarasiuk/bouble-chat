@@ -33,12 +33,13 @@ type userEnvelope struct {
 }
 
 type Client struct {
-	hub            *Hub
+	release        func()
 	conn           *websocket.Conn
 	send           chan []byte
 	conversationID int64 // 0 = presence-only
 	userID         int64
 	username       string
+	guestID        string
 }
 
 type onlineSnapshot struct {
@@ -285,7 +286,7 @@ func (h *Hub) fanoutPresence(username string, online bool) {
 
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		c.release()
 		c.conn.Close()
 	}()
 
@@ -337,13 +338,13 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request, conversationID, user
 	}
 
 	client := &Client{
-		hub:            h,
 		conn:           conn,
 		send:           make(chan []byte, 256),
 		conversationID: conversationID,
 		userID:         userID,
 		username:       username,
 	}
+	client.release = func() { h.unregister <- client }
 
 	h.register <- client
 	go client.readPump()

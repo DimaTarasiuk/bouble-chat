@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import notificationMp3 from "./static/bulk-10.mp3";
 import {
   API_URL,
@@ -21,13 +21,18 @@ import {
   SHADOW_D,
   SHADOW_L,
   neu,
-  haptic,
   MIN_PASSWORD_LEN,
   MAX_MESSAGE_LEN,
   MESSAGES_PAGE_SIZE,
   openSocket,
+  EMOJIS,
+  PANE_DIVIDER,
+  DESKTOP_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+  canEditMessage,
 } from "./shared.js";
-import { Avatar, NeuField } from "./ui.jsx";
+import { Avatar, NeuField, AppStyles, BooblifyLogo, Bubble } from "./ui.jsx";
 import UserCard from "./admin/UserCard.jsx";
 import StatsPanel from "./admin/StatsPanel.jsx";
 import AnnouncementsPanel from "./admin/AnnouncementsPanel.jsx";
@@ -35,47 +40,12 @@ import FeedbackPanel from "./admin/FeedbackPanel.jsx";
 import FeedbackForm from "./FeedbackForm.jsx";
 import AnnouncementPopup from "./AnnouncementPopup.jsx";
 
-const PANE_DIVIDER = "rgba(163, 177, 198, 0.35)";
-const DESKTOP_QUERY = "(min-width: 900px)";
-const PHONE_QUERY = "(max-width: 480px)";
-
-function useMediaQuery(query) {
-  return useSyncExternalStore(
-    (onChange) => {
-      const mql = window.matchMedia(query);
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(query).matches,
-    () => false,
-  );
-}
-
 const mergeAnnouncements = (prev, incoming) => {
   const seen = new Set(prev.map((a) => a.id));
   const added = incoming.filter((a) => a?.id && !seen.has(a.id));
   if (!added.length) return prev;
   return [...prev, ...added].sort((a, b) => a.id - b.id);
 };
-
-const EMOJIS = [
-  "😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊",
-  "😇", "🙂", "😉", "😍", "🥰", "😘", "😗", "😋",
-  "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔",
-  "😐", "😑", "😶", "🙄", "😏", "😣", "😥", "😮",
-  "😯", "😪", "😫", "🥱", "😴", "😌", "😛", "😓",
-  "😕", "🙃", "🫠", "😲", "☹️", "🙁", "😖", "😞",
-  "😟", "😤", "😢", "😭", "😦", "😧", "😨", "😩",
-  "🤯", "😬", "😰", "😱", "🥵", "🥶", "😳", "🤪",
-  "😵", "😡", "😠", "🤬", "😷", "🤒", "🤕", "🤢",
-  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤟",
-  "🤘", "👌", "🤌", "🤏", "👈", "👉", "👆", "👇",
-  "👋", "🤚", "🖐️", "✋", "🖖", "💪", "🙏", "💅",
-  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
-  "💔", "❣️", "💕", "💞", "💓", "💗", "💖", "💘",
-  "🔥", "⭐", "✨", "💫", "🎉", "🎊", "🎈", "🎁",
-  "✅", "❌", "❓", "❗", "💯", "💢", "💤", "💬",
-];
 
 const createNotificationSound = () => {
   const audio = new Audio(notificationMp3);
@@ -101,196 +71,6 @@ const playNotification = (audioRef) => {
   }
 };
 
-function AppStyles() {
-  useEffect(() => {
-    const onDown = (e) => {
-      const el = e.target.closest?.(".neu-press, .neu-press-send, .neu-press-soft");
-      if (!el) return;
-      haptic(el.classList.contains("neu-press-send") ? 20 : 12);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, []);
-
-  return (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: ${NEU_BG}; }
-      ::-webkit-scrollbar { width: 0; }
-      @media ${DESKTOP_QUERY} {
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(163, 177, 198, 0.55); border-radius: 3px; }
-      }
-      @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(10px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes profileHintPulse {
-        0%, 100% {
-          transform: scale(1);
-          box-shadow: 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
-        }
-        40% {
-          transform: scale(1.1);
-          box-shadow: 0 0 0 0 rgba(192, 132, 160, 0.45), 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
-        }
-        70% {
-          transform: scale(1.04);
-          box-shadow: 0 0 0 10px rgba(192, 132, 160, 0), 4px 4px 8px ${SHADOW_D}, -4px -4px 8px ${SHADOW_L};
-        }
-      }
-      .profile-hint-pulse {
-        animation: profileHintPulse 1.35s ease-in-out infinite;
-      }
-      @keyframes booblifyShine {
-        from { background-position: 0% 50%; }
-        to   { background-position: 300% 50%; }
-      }
-      @keyframes booblifyWave {
-        0%, 55%, 100% { transform: translateY(0) scale(1); }
-        22% { transform: translateY(-2.5px) scale(1.18); }
-        38% { transform: translateY(0.5px) scale(0.97); }
-      }
-      .booblify-logo {
-        display: inline-flex;
-        align-items: baseline;
-        font-size: 15px;
-        font-weight: 800;
-        letter-spacing: 0.02em;
-        line-height: 1.35;
-      }
-      .booblify-letter {
-        display: inline-block;
-        transform-origin: 50% 70%;
-        background: linear-gradient(
-          100deg,
-          #5b7399 0%,
-          #6b8fb5 20%,
-          #9a8bb8 36%,
-          #c084a0 50%,
-          #e01b77 60%,
-          #ff9ec4 66%,
-          #c084a0 76%,
-          #6b8fb5 90%,
-          #5b7399 100%
-        );
-        background-size: 300% 100%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        -webkit-text-fill-color: transparent;
-        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 2px rgba(107, 143, 181, 0.35));
-        animation:
-          booblifyShine 4.5s linear infinite,
-          booblifyWave 3.2s ease-in-out infinite;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .booblify-letter {
-          animation: none;
-          background-position: 0% 50%;
-          transform: none;
-        }
-      }
-      @keyframes badgeIn {
-        0%   { transform: scale(0); opacity: 0; }
-        60%  { transform: scale(1.3); opacity: 1; }
-        80%  { transform: scale(0.92); }
-        100% { transform: scale(1); opacity: 1; }
-      }
-      @keyframes badgePop {
-        0%   { transform: scale(1) rotate(0deg); }
-        25%  { transform: scale(1.5) rotate(-10deg); }
-        45%  { transform: scale(0.88) rotate(7deg); }
-        65%  { transform: scale(1.14) rotate(-3deg); }
-        100% { transform: scale(1) rotate(0deg); }
-      }
-      @keyframes badgeRing {
-        0%   { transform: scale(1); opacity: 0.65; }
-        100% { transform: scale(2.3); opacity: 0; }
-      }
-      @keyframes badgeNum {
-        0%   { transform: translateY(70%); opacity: 0; }
-        100% { transform: translateY(0); opacity: 1; }
-      }
-      .unread-badge {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        border-radius: 50px;
-        color: #fff;
-        font-weight: 800;
-        animation: badgeIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-      }
-      .unread-badge.pop {
-        animation: badgePop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-      }
-      .unread-badge-ring {
-        position: absolute;
-        inset: 0;
-        border-radius: 50px;
-        pointer-events: none;
-        opacity: 0;
-      }
-      .unread-badge.pop .unread-badge-ring {
-        animation: badgeRing 0.75s ease-out both;
-      }
-      .unread-badge-num {
-        display: inline-block;
-        animation: badgeNum 0.3s ease-out both;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .unread-badge, .unread-badge.pop, .unread-badge-num,
-        .unread-badge.pop .unread-badge-ring {
-          animation: none;
-        }
-      }
-      .neu-press {
-        transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-        -webkit-tap-highlight-color: transparent;
-      }
-      .neu-press:active {
-        transform: scale(0.97);
-        box-shadow: inset 3px 3px 6px ${SHADOW_D}, inset -3px -3px 6px ${SHADOW_L} !important;
-      }
-      .neu-press-send:active {
-        transform: scale(0.93);
-        box-shadow: inset 3px 3px 6px #6e7580, inset -3px -3px 6px #9ea8b3 !important;
-      }
-      .neu-press-soft:active {
-        transform: scale(0.96);
-        opacity: 0.65;
-      }
-    `}</style>
-  );
-}
-
-const BOOBLIFY = "Booblify";
-
-function BooblifyLogo({ size } = {}) {
-  return (
-    <span
-      className="booblify-logo"
-      aria-label={BOOBLIFY}
-      style={size ? { fontSize: size } : undefined}
-    >
-      {BOOBLIFY.split("").map((ch, i) => (
-        <span
-          key={`${ch}${i}`}
-          className="booblify-letter"
-          style={{ animationDelay: `${-i * 0.18}s, ${i * 0.12}s` }}
-          aria-hidden="true"
-        >
-          {ch}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 // Pink unread counter. Pops (with a ripple ring) every time the count grows;
 // the number itself slides in on any change.
 function UnreadBadge({ count, small = false }) {
@@ -315,237 +95,6 @@ function UnreadBadge({ count, small = false }) {
       <span className="unread-badge-ring" style={{ background: NOTIFY_BADGE }} aria-hidden="true" />
       <span key={label} className="unread-badge-num">{label}</span>
     </span>
-  );
-}
-
-const EDIT_WINDOW_MS = 10 * 60 * 1000;
-
-function canEditMessage(msg, username) {
-  if (!msg || msg.from !== username) return false;
-  if (typeof msg.id !== "number") return false;
-  const created = new Date(msg.time).getTime();
-  if (Number.isNaN(created)) return false;
-  return Date.now() - created <= EDIT_WINDOW_MS;
-}
-
-function Bubble({ msg, username, animate = false, onEdit, onReply }) {
-  const isMe = msg.from === username;
-  const canReply = !isMe && typeof onReply === "function";
-  const initials = (msg.from || "?").slice(0, 2).toUpperCase();
-  const longPressRef = useRef(null);
-  const startRef = useRef({ x: 0, y: 0, dragging: false, replied: false, pointerId: null, active: false });
-  const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const dragXRef = useRef(0);
-
-  const clearLongPress = () => {
-    if (longPressRef.current) {
-      clearTimeout(longPressRef.current);
-      longPressRef.current = null;
-    }
-  };
-
-  const resetDrag = () => {
-    startRef.current.dragging = false;
-    startRef.current.replied = false;
-    startRef.current.active = false;
-    startRef.current.pointerId = null;
-    dragXRef.current = 0;
-    setDragX(0);
-    setDragging(false);
-  };
-
-  const snapBack = () => {
-    startRef.current.dragging = false;
-    dragXRef.current = 0;
-    setDragX(0);
-    setDragging(false);
-  };
-
-  const onPointerDown = (e) => {
-    if (e.button != null && e.button !== 0) return;
-    // Own messages: capture for long-press edit only. Reply capture starts on confirmed drag.
-    if (isMe) {
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-    }
-    startRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      dragging: false,
-      replied: false,
-      pointerId: e.pointerId,
-      active: true,
-    };
-    dragXRef.current = 0;
-    setDragX(0);
-    setDragging(false);
-    clearLongPress();
-    if (isMe && onEdit && canEditMessage(msg, username)) {
-      longPressRef.current = setTimeout(() => {
-        longPressRef.current = null;
-        if (startRef.current.dragging || startRef.current.replied) return;
-        haptic(18);
-        onEdit(msg);
-      }, 480);
-    }
-  };
-
-  const onPointerMove = (e) => {
-    const start = startRef.current;
-    if (!start.active || start.replied || !canReply) return;
-    // Ignore hover / move without primary button (mouse false triggers)
-    if (e.pointerType === "mouse" && (e.buttons & 1) !== 1) return;
-
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-
-    if (!start.dragging) {
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-        clearLongPress();
-      }
-      // only start reply-drag when clearly horizontal right swipe
-      if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        start.dragging = true;
-        setDragging(true);
-        clearLongPress();
-        try {
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-        } catch {
-          // ignore
-        }
-      } else {
-        return;
-      }
-    }
-
-    e.preventDefault?.();
-    const next = Math.max(0, Math.min(72, dx));
-    dragXRef.current = next;
-    setDragX(next);
-    if (next >= 56 && start.dragging) {
-      start.replied = true;
-      haptic(16);
-      snapBack();
-      onReply(msg);
-    }
-  };
-
-  const onPointerUp = (e) => {
-    clearLongPress();
-    try {
-      e.currentTarget.releasePointerCapture?.(e.pointerId);
-    } catch {
-      // ignore
-    }
-    resetDrag();
-  };
-
-  const onPointerCancel = () => {
-    clearLongPress();
-    resetDrag();
-  };
-
-  const onLostPointerCapture = () => {
-    clearLongPress();
-    resetDrag();
-  };
-
-  const onContextMenu = (e) => {
-    if (isMe && canEditMessage(msg, username)) e.preventDefault();
-  };
-
-  const replyPreview = msg.reply_to;
-
-  return (
-    <div style={{
-      display: "flex",
-      flexDirection: isMe ? "row-reverse" : "row",
-      alignItems: "flex-end",
-      gap: 10,
-      marginBottom: 16,
-      position: "relative",
-      ...(animate ? { animation: "fadeUp 0.25s ease both" } : {}),
-    }}>
-      {!isMe && <Avatar initials={initials} color={NAME_ABBR} />}
-
-      <div
-        style={{
-        maxWidth: "min(68%, 560px)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: isMe ? "flex-end" : "flex-start",
-        transform: canReply ? `translateX(${dragX}px)` : undefined,
-        transition: canReply && !dragging ? "transform 0.18s ease" : "none",
-        willChange: canReply ? "transform" : undefined,
-      }}>
-        {!isMe && (
-          <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, marginBottom: 3, paddingLeft: 4 }}>
-            {msg.from}
-          </span>
-        )}
-        <div
-          onPointerDown={onPointerDown}
-          onPointerMove={canReply || isMe ? onPointerMove : undefined}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerCancel}
-          onLostPointerCapture={onLostPointerCapture}
-          onContextMenu={onContextMenu}
-          style={{
-            padding: "11px 16px",
-            borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-            background: isMe ? "#ffffff" : "#f5e8ee",
-            boxShadow: isMe
-              ? `4px 4px 10px ${SHADOW_D}, -4px -4px 10px ${SHADOW_L}`
-              : `4px 4px 10px #d9b8c8, -4px -4px 10px ${SHADOW_L}`,
-            fontSize: 14,
-            fontWeight: 600,
-            color: "#4b5563",
-            lineHeight: 1.5,
-            fontFamily: "'Nunito', sans-serif",
-            touchAction: canReply ? "pan-y" : "auto",
-            userSelect: "none",
-            WebkitUserSelect: "none",
-            cursor: isMe && canEditMessage(msg, username) ? "pointer" : (canReply ? "grab" : "default"),
-            maxWidth: "100%",
-          }}
-        >
-          {replyPreview && (
-            <div style={{
-              marginBottom: 8,
-              padding: "6px 10px",
-              borderRadius: 10,
-              borderLeft: "3px solid #c084a0",
-              background: isMe ? "rgba(192,132,160,0.12)" : "rgba(255,255,255,0.55)",
-              fontSize: 12,
-              lineHeight: 1.35,
-            }}>
-              <div style={{ fontWeight: 800, color: "#c084a0", marginBottom: 2 }}>
-                {replyPreview.from}
-              </div>
-              <div style={{
-                fontWeight: 600,
-                color: "#6b7280",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                maxWidth: 180,
-              }}>
-                {replyPreview.text}
-              </div>
-            </div>
-          )}
-          {msg.text}
-        </div>
-        <span style={{
-          fontSize: 11, color: "#9ca3af", fontWeight: 600,
-          marginTop: 4, paddingLeft: isMe ? 0 : 4, paddingRight: isMe ? 4 : 0,
-        }}>
-          {new Date(msg.time).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-      </div>
-
-      {isMe && <Avatar initials={initials} color={NAME_ABBR} />}
-    </div>
   );
 }
 
@@ -848,7 +397,7 @@ function ProfileCard({ onClose, onSaved }) {
   );
 }
 
-function AuthScreen({ onAuth, notice = "" }) {
+function AuthScreen({ onAuth, notice = "", onOpenRandom }) {
   const [mode, setMode] = useState("login");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -1065,6 +614,24 @@ function AuthScreen({ onAuth, notice = "" }) {
         >
           {isRegister ? "Вже є акаунт? Увійти" : "Немає акаунта? Зареєструватися"}
         </button>
+
+        {onOpenRandom && (
+          <button
+            className="neu-press-soft"
+            onClick={onOpenRandom}
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              fontFamily: "'Nunito', sans-serif",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#6b8fb5",
+            }}
+          >
+            ← Інкогніто
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1404,7 +971,7 @@ function ConversationsScreen({
   );
 }
 
-export default function ChatPage() {
+export default function ChatPage({ onOpenRandom }) {
   const [username, setUsername] = useState(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     const saved = localStorage.getItem(USER_KEY);
@@ -2085,7 +1652,7 @@ export default function ChatPage() {
   };
 
   if (!username) {
-    return <AuthScreen onAuth={applyAuth} notice={authNotice} />;
+    return <AuthScreen onAuth={applyAuth} notice={authNotice} onOpenRandom={onOpenRandom} />;
   }
 
   const accountBox = (
@@ -2146,6 +1713,22 @@ export default function ChatPage() {
         </div>
       </div>
       {accountBox}
+      {onOpenRandom && (
+        <button
+          className="neu-press"
+          onClick={onOpenRandom}
+          title="Інкогніто"
+          aria-label="Інкогніто"
+          style={{
+            width: 36, height: 36, borderRadius: "50%",
+            border: "none", background: NEU_BG,
+            boxShadow: neu(false, 3, 6),
+            cursor: "pointer",
+            fontSize: 16,
+            flexShrink: 0,
+          }}
+        >🎲</button>
+      )}
     </div>
   );
 

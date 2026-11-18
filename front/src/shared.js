@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 export const API_URL = (
   import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? "http://localhost:7979" : window.location.origin)
@@ -22,10 +24,8 @@ export const MIN_PASSWORD_LEN = 6;
 export const MAX_MESSAGE_LEN = 1000;
 export const MESSAGES_PAGE_SIZE = 50;
 
-export const openSocket = (path) => {
-  const token = localStorage.getItem(TOKEN_KEY) || "";
-  return new WebSocket(`${API_URL.replace(/^http/, "ws")}${path}`, ["bearer", token]);
-};
+export const openSocket = (path, token = localStorage.getItem(TOKEN_KEY) || "") =>
+  new WebSocket(`${API_URL.replace(/^http/, "ws")}${path}`, ["bearer", token]);
 
 export const clearSession = () => {
   localStorage.removeItem(TOKEN_KEY);
@@ -38,6 +38,10 @@ export const ONLINE_OFF_TEXT = "#9ca3af";
 export const ONLINE_DOT_SHADOW = "rgb(224, 229, 236) 0px 0px 0px 1px";
 export const NAME_ABBR = "rgb(224, 27, 119)";
 export const NOTIFY_BADGE = "rgb(220 43 126 / 87%)";
+export const GENDER_BUBBLE = {
+  male: { bg: "#dbeafe", shadow: "#a9bfdc" },
+  female: { bg: "#fce7f3", shadow: "#e0b4cc" },
+};
 export const onlineColor = (gender) => {
   if (gender === "male") return "rgb(31 131 255 / 93%)";
   if (gender === "female") return "#f9a8d4";
@@ -72,4 +76,49 @@ export function haptic(ms = 12) {
   } catch {
     // Vibration is optional and may be blocked by the browser.
   }
+}
+
+export const PANE_DIVIDER = "rgba(163, 177, 198, 0.35)";
+export const DESKTOP_QUERY = "(min-width: 900px)";
+export const PHONE_QUERY = "(max-width: 480px)";
+
+export function useMediaQuery(query) {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
+export const EMOJIS = [
+  "😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊",
+  "😇", "🙂", "😉", "😍", "🥰", "😘", "😗", "😋",
+  "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔",
+  "😐", "😑", "😶", "🙄", "😏", "😣", "😥", "😮",
+  "😯", "😪", "😫", "🥱", "😴", "😌", "😛", "😓",
+  "😕", "🙃", "🫠", "😲", "☹️", "🙁", "😖", "😞",
+  "😟", "😤", "😢", "😭", "😦", "😧", "😨", "😩",
+  "🤯", "😬", "😰", "😱", "🥵", "🥶", "😳", "🤪",
+  "😵", "😡", "😠", "🤬", "😷", "🤒", "🤕", "🤢",
+  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤟",
+  "🤘", "👌", "🤌", "🤏", "👈", "👉", "👆", "👇",
+  "👋", "🤚", "🖐️", "✋", "🖖", "💪", "🙏", "💅",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+  "💔", "❣️", "💕", "💞", "💓", "💗", "💖", "💘",
+  "🔥", "⭐", "✨", "💫", "🎉", "🎊", "🎈", "🎁",
+  "✅", "❌", "❓", "❗", "💯", "💢", "💤", "💬",
+];
+
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+export function canEditMessage(msg, username) {
+  if (!msg || msg.from !== username) return false;
+  if (typeof msg.id !== "number") return false;
+  const created = new Date(msg.time).getTime();
+  if (Number.isNaN(created)) return false;
+  return Date.now() - created <= EDIT_WINDOW_MS;
 }

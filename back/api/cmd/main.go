@@ -49,10 +49,13 @@ func main() {
 	defer convRepo.Close()
 	adminRepo := repository.NewAdminRepository()
 	defer adminRepo.Close()
+	randomRepo := repository.NewRandomRepository()
+	defer randomRepo.Close()
 
 	authSvc := service.NewAuthService(userRepo, secret)
 	chatSvc := service.NewConversationService(userRepo, convRepo, msgRepo)
 	adminSvc := service.NewAdminService(userRepo, adminRepo)
+	randomSvc := service.NewRandomService(randomRepo)
 
 	allowedOrigins := []string{"http://localhost:*"}
 	for origin := range strings.SplitSeq(os.Getenv("FRONTEND_URL"), ",") {
@@ -70,10 +73,17 @@ func main() {
 	go hub.Run(ctx)
 	go recordOnlineSnapshots(ctx, adminSvc, hub)
 
+	var randomH *handler.RandomHandler
+	randomHub := ws.NewRandomHub(originChecker(allowedOrigins), randomReconnectGrace, func(guestID string) {
+		randomH.GuestGone(guestID)
+	})
+	randomH = handler.NewRandom(randomSvc, randomHub, secret)
+	go pruneRandomQueue(ctx, randomSvc, randomHub)
+
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{"GET", "POST", "PATCH", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}))
 	r.Use(handler.LimitBody)
@@ -91,6 +101,17 @@ func main() {
 	r.With(rateLimitByIP(5, time.Hour)).Post("/api/register", authH.Register)
 	r.Get("/ws", authH.WSAuth(chatH.ServeWS))
 	r.Get("/ws/presence", authH.WSAuth(chatH.ServePresence))
+
+	r.With(rateLimitByIP(20, time.Hour)).Post("/api/random/start", randomH.Start)
+	r.Get("/ws/random", randomH.WSAuth(randomH.ServeWS))
+	r.Group(func(r chi.Router) {
+		r.Use(randomH.Middleware)
+		r.With(rateLimitByGuest(30, time.Minute)).Post("/api/random/search", randomH.Search)
+		r.Delete("/api/random/search", randomH.Cancel)
+		r.Post("/api/random/skip", randomH.Skip)
+		r.Get("/api/random/messages", randomH.Messages)
+		r.With(rateLimitByGuest(30, time.Minute)).Post("/api/random/messages", randomH.Send)
+	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(authH.Middleware)
@@ -185,6 +206,18 @@ func rateLimitByUser(requests int, window time.Duration) func(http.Handler) http
 	)
 }
 
+func rateLimitByGuest(requests int, window time.Duration) func(http.Handler) http.Handler {
+	return httprate.Limit(requests, window,
+		httprate.WithKeyFuncs(func(r *http.Request) (string, error) {
+			if id, ok := handler.GuestFromContext(r.Context()); ok {
+				return "guest:" + id, nil
+			}
+			return httprate.KeyByRealIP(r)
+		}),
+		httprate.WithLimitHandler(tooManyRequests),
+	)
+}
+
 func tooManyRequests(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
@@ -236,6 +269,29 @@ func recordOnlineSnapshots(ctx context.Context, svc *service.AdminService, hub *
 				log.Printf("online snapshot failed: %v", err)
 			}
 			cancel()
+		}
+	}
+}
+
+const randomReconnectGrace = 15 * time.Second
+
+// pruneRandomQueue drops queued guests without a live socket. The first run
+// clears everyone left over from before a restart.
+func pruneRandomQueue(ctx context.Context, svc *service.RandomService, hub *ws.RandomHub) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		cutoff := time.Now()
+		pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := svc.PruneQueue(pruneCtx, hub.ConnectedIDs(), cutoff); err != nil {
+			log.Printf("random queue prune failed: %v", err)
+		}
+		cancel()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
