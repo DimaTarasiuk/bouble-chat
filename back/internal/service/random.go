@@ -126,7 +126,7 @@ func (s *RandomService) History(ctx context.Context, guestID string) (domain.Ran
 }
 
 // Send stores a message and returns it as seen by the sender, plus the peer ID.
-func (s *RandomService) Send(ctx context.Context, guestID, text string) (domain.RandomMessage, string, error) {
+func (s *RandomService) Send(ctx context.Context, guestID, text string, replyToID *int64) (domain.RandomMessage, string, error) {
 	text, err := validateText(text)
 	if err != nil {
 		return domain.RandomMessage{}, "", err
@@ -135,7 +135,19 @@ func (s *RandomService) Send(ctx context.Context, guestID, text string) (domain.
 	if err != nil {
 		return domain.RandomMessage{}, "", err
 	}
-	m, err := s.repo.CreateMessage(ctx, sess.ID, guestID, text)
+	if replyToID != nil {
+		reply, replySessionID, err := s.repo.GetMessage(ctx, *replyToID)
+		if err != nil {
+			return domain.RandomMessage{}, "", err
+		}
+		if replySessionID != sess.ID {
+			return domain.RandomMessage{}, "", ErrForbidden
+		}
+		if reply.FromGuest == guestID {
+			return domain.RandomMessage{}, "", ErrForbidden
+		}
+	}
+	m, err := s.repo.CreateMessage(ctx, sess.ID, guestID, text, replyToID)
 	if err != nil {
 		return domain.RandomMessage{}, "", err
 	}

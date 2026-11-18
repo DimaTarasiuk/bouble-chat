@@ -47,7 +47,27 @@ const ageBandByValue = (value) => AGE_BANDS.find((b) => b.value === value) || nu
 const ageBandByRange = (min, max) => AGE_BANDS.find((b) => b.min === min && b.max === max) || null;
 
 const genderSign = (gender) => (gender === "female" ? "♀" : "♂");
-const peerTitle = (session) => `${session.peer_gender === "female" ? "Вона" : "Він"}, ${session.peer_age}`;
+const genderLabel = (gender) => (gender === "female" ? "Вона" : "Він");
+
+const MALE_NICKS = [
+  "Тіньовий Лис", "Кавовий Хаос", "Нічний Орбіт", "Мовчазний Грім",
+  "Синій Койот", "Піксельний Вовк", "Тихий Метеор", "Дикий Байт",
+  "Міський Яструб", "Крижаний Драйв", "Чорний Еспресо", "Ретро Кіт",
+  "Сірий Комета", "Бунт і Бас", "Лісовий Модем", "Північний Дрон",
+];
+
+const FEMALE_NICKS = [
+  "Місячна Лисиця", "Цукрова Буря", "Нічна Орхідея", "Тиха Комета",
+  "Рожева Іскра", "Океанська Мрія", "Дика Ваніль", "Срібна Луна",
+  "Кавова Фея", "Піксельна Муза", "Туманна Зірка", "М’ятна Хвиля",
+  "Золота Нота", "Лісова Іскра", "Неонова Киця", "Ранкова Злива",
+];
+
+function peerNick(session) {
+  const list = session.peer_gender === "female" ? FEMALE_NICKS : MALE_NICKS;
+  const id = Number(session.id) || 0;
+  return list[Math.abs(id) % list.length];
+}
 
 function loadForm() {
   try {
@@ -201,6 +221,7 @@ export default function RandomPage({ onOpenAccount }) {
   const [session, setSession] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
 
   const phaseRef = useRef(phase);
@@ -220,6 +241,9 @@ export default function RandomPage({ onOpenAccount }) {
     setToken(null);
     setSession(null);
     setMessages([]);
+    setReplyTo(null);
+    setInput("");
+    setEmojiOpen(false);
     setPhase("form");
     setError(message);
   }, []);
@@ -231,6 +255,9 @@ export default function RandomPage({ onOpenAccount }) {
   const search = useCallback(async () => {
     setSession(null);
     setMessages([]);
+    setReplyTo(null);
+    setInput("");
+    setEmojiOpen(false);
     setPhase("searching");
     const res = await api("POST", "/api/random/search", token);
     if (res.status === 401) return expire();
@@ -256,10 +283,13 @@ export default function RandomPage({ onOpenAccount }) {
       if (ev.type === "matched") {
         setSession(ev.session);
         setMessages([]);
+        setReplyTo(null);
+        setInput("");
         setPhase("chat");
       } else if (ev.type === "message" && ev.message) {
         setMessages((prev) => (prev.some((m) => m.id === ev.message.id) ? prev : [...prev, { ...ev.message, isNew: true }]));
       } else if (ev.type === "peer_left" && ev.session_id === sessionIdRef.current) {
+        setReplyTo(null);
         setPhase("peerLeft");
       }
     };
@@ -363,17 +393,35 @@ export default function RandomPage({ onOpenAccount }) {
     search();
   };
 
+  const cancelReply = () => setReplyTo(null);
+
+  const startReply = (msg) => {
+    if (!msg || typeof msg.id !== "number" || msg.mine) return;
+    setReplyTo({
+      id: msg.id,
+      from: genderLabel(msg.from_gender),
+      text: msg.text || "",
+    });
+    inputRef.current?.focus();
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || phase !== "chat") return;
+    const replyTarget = replyTo;
     setInput("");
+    setReplyTo(null);
     setEmojiOpen(false);
-    const res = await api("POST", "/api/random/messages", token, { text });
+    const res = await api("POST", "/api/random/messages", token, {
+      text,
+      ...(replyTarget ? { reply_to: replyTarget.id } : {}),
+    });
     if (res.ok) {
       setMessages((prev) => (prev.some((m) => m.id === res.data.id) ? prev : [...prev, { ...res.data, isNew: true }]));
       return;
     }
     setInput(text);
+    if (replyTarget) setReplyTo(replyTarget);
     if (res.status === 401) expire();
     else if (res.status === 409) setPhase("peerLeft");
   };
@@ -527,11 +575,11 @@ export default function RandomPage({ onOpenAccount }) {
     }}>
       <Avatar initials={genderSign(session.peer_gender)} color={onlineColor(session.peer_gender)} />
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>{peerTitle(session)}</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#4b5563" }}>{peerNick(session)}</div>
         <div style={{ fontSize: 12, fontWeight: 600, color: phase === "peerLeft" ? "#9ca3af" : onlineColor(session.peer_gender) }}>
           {phase === "peerLeft"
             ? (session.peer_gender === "female" ? "Вийшла з чату" : "Вийшов з чату")
-            : "● Випадковий співрозмовник"}
+            : "● онлайн"}
         </div>
       </div>
       {phase === "chat" && (
@@ -558,6 +606,38 @@ export default function RandomPage({ onOpenAccount }) {
 
   const composer = (
     <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+      {replyTo && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "8px 12px",
+          borderRadius: 16,
+          background: NEU_BG,
+          boxShadow: neu(true, 2, 5),
+        }}>
+          <div style={{
+            width: 3, alignSelf: "stretch", borderRadius: 2, background: "#c084a0", flexShrink: 0,
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#c084a0" }}>
+              Відповідь · {replyTo.from}
+            </div>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: "#6b7280",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {replyTo.text}
+            </div>
+          </div>
+          <button
+            className="neu-press-soft"
+            onClick={cancelReply}
+            style={{
+              border: "none", background: "transparent", cursor: "pointer",
+              fontFamily: "'Nunito', sans-serif", fontSize: 12, fontWeight: 700, color: "#9ca3af",
+            }}
+          >✕</button>
+        </div>
+      )}
       {emojiOpen && (
         <div style={{
           maxHeight: 196,
@@ -600,8 +680,15 @@ export default function RandomPage({ onOpenAccount }) {
             value={input}
             maxLength={MAX_MESSAGE_LEN}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder="Написати повідомлення..."
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && replyTo) {
+                e.preventDefault();
+                cancelReply();
+                return;
+              }
+              if (e.key === "Enter") send();
+            }}
+            placeholder={replyTo ? "Написати відповідь..." : "Написати повідомлення..."}
             style={{
               flex: 1, border: "none", outline: "none",
               background: "transparent",
@@ -684,6 +771,7 @@ export default function RandomPage({ onOpenAccount }) {
             palette={GENDER_BUBBLE[m.from_gender]}
             initials={genderSign(m.from_gender)}
             animate={Boolean(m.isNew)}
+            onReply={phase === "chat" ? startReply : undefined}
           />
         ))}
         <div ref={bottomRef} />

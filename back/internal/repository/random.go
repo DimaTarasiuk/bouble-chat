@@ -29,7 +29,8 @@ type RandomRepo interface {
 	PruneQueue(ctx context.Context, keep []string, queuedBefore time.Time) error
 	ActiveSession(ctx context.Context, guestID string) (domain.RandomSession, error)
 	EndActiveSession(ctx context.Context, guestID string) (domain.RandomSession, error)
-	CreateMessage(ctx context.Context, sessionID int64, fromGuest, text string) (domain.RandomMessage, error)
+	CreateMessage(ctx context.Context, sessionID int64, fromGuest, text string, replyToID *int64) (domain.RandomMessage, error)
+	GetMessage(ctx context.Context, id int64) (domain.RandomMessage, int64, error)
 	ListMessages(ctx context.Context, sessionID int64, limit int) ([]domain.RandomMessage, error)
 }
 
@@ -201,27 +202,65 @@ func (r *RandomRepository) EndActiveSession(ctx context.Context, guestID string)
 	`, guestID))
 }
 
-func (r *RandomRepository) CreateMessage(ctx context.Context, sessionID int64, fromGuest, text string) (domain.RandomMessage, error) {
-	m := domain.RandomMessage{FromGuest: fromGuest, Text: text}
+const randomMessageSelect = `
+	SELECT m.id, m.session_id, m.from_guest::text, g.gender, m.text, m.created_at,
+		rm.id, CASE WHEN rg.gender = 'female' THEN 'Вона' ELSE 'Він' END, rm.text
+	FROM random.messages m
+	JOIN random.guests g ON g.id = m.from_guest
+	LEFT JOIN random.messages rm ON rm.id = m.reply_to_message_id
+	LEFT JOIN random.guests rg ON rg.id = rm.from_guest`
+
+func scanRandomMessage(scan interface {
+	Scan(dest ...any) error
+}) (domain.RandomMessage, int64, error) {
+	var m domain.RandomMessage
+	var sessionID int64
+	var replyID *int64
+	var replyFrom, replyText *string
+	err := scan.Scan(
+		&m.ID, &sessionID, &m.FromGuest, &m.FromGender, &m.Text, &m.CreatedAt,
+		&replyID, &replyFrom, &replyText,
+	)
+	if err != nil {
+		return domain.RandomMessage{}, 0, err
+	}
+	if replyID != nil && replyFrom != nil && replyText != nil {
+		m.ReplyTo = &domain.ReplyPreview{ID: *replyID, From: *replyFrom, Text: *replyText}
+	}
+	return m, sessionID, nil
+}
+
+func (r *RandomRepository) CreateMessage(ctx context.Context, sessionID int64, fromGuest, text string, replyToID *int64) (domain.RandomMessage, error) {
+	var id int64
 	err := r.db.QueryRow(ctx, `
 		WITH m AS (
-			INSERT INTO random.messages (session_id, from_guest, text)
-			VALUES ($1, $2::uuid, $3)
-			RETURNING id, from_guest, created_at
+			INSERT INTO random.messages (session_id, from_guest, text, reply_to_message_id)
+			VALUES ($1, $2::uuid, $3, $4)
+			RETURNING id
 		), s AS (
 			UPDATE random.sessions SET last_message_at = NOW() WHERE id = $1
 		)
-		SELECT m.id, g.gender, m.created_at
-		FROM m JOIN random.guests g ON g.id = m.from_guest
-	`, sessionID, fromGuest, text).Scan(&m.ID, &m.FromGender, &m.CreatedAt)
+		SELECT id FROM m
+	`, sessionID, fromGuest, text, replyToID).Scan(&id)
+	if err != nil {
+		return domain.RandomMessage{}, err
+	}
+	m, _, err := r.GetMessage(ctx, id)
 	return m, err
 }
 
+func (r *RandomRepository) GetMessage(ctx context.Context, id int64) (domain.RandomMessage, int64, error) {
+	m, sessionID, err := scanRandomMessage(r.db.QueryRow(ctx, randomMessageSelect+`
+		WHERE m.id = $1
+	`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.RandomMessage{}, 0, ErrNotFound
+	}
+	return m, sessionID, err
+}
+
 func (r *RandomRepository) ListMessages(ctx context.Context, sessionID int64, limit int) ([]domain.RandomMessage, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT m.id, m.from_guest::text, g.gender, m.text, m.created_at
-		FROM random.messages m
-		JOIN random.guests g ON g.id = m.from_guest
+	rows, err := r.db.Query(ctx, randomMessageSelect+`
 		WHERE m.session_id = $1
 		ORDER BY m.id DESC
 		LIMIT $2
@@ -233,8 +272,8 @@ func (r *RandomRepository) ListMessages(ctx context.Context, sessionID int64, li
 
 	messages := make([]domain.RandomMessage, 0, limit)
 	for rows.Next() {
-		var m domain.RandomMessage
-		if err := rows.Scan(&m.ID, &m.FromGuest, &m.FromGender, &m.Text, &m.CreatedAt); err != nil {
+		m, _, err := scanRandomMessage(rows)
+		if err != nil {
 			return nil, err
 		}
 		messages = append(messages, m)

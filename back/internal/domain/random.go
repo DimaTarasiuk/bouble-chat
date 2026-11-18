@@ -73,11 +73,19 @@ type RandomSession struct {
 	PeerID     string    `json:"-"`
 }
 
+func GenderLabel(gender string) string {
+	if gender == "female" {
+		return "Вона"
+	}
+	return "Він"
+}
+
 type RandomMessage struct {
-	ID         int64     `json:"id"`
-	FromGender string    `json:"from_gender"`
-	Mine       bool      `json:"mine"`
-	Text       string    `json:"text"`
-	CreatedAt  time.Time `json:"time"`
-	FromGuest  string    `json:"-"`
+	ID         int64         `json:"id"`
+	FromGender string        `json:"from_gender"`
+	Mine       bool          `json:"mine"`
+	Text       string        `json:"text"`
+	CreatedAt  time.Time     `json:"time"`
+	ReplyTo    *ReplyPreview `json:"reply_to,omitempty"`
+	FromGuest  string        `json:"-"`
 }

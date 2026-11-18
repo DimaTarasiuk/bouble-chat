@@ -146,7 +146,8 @@ func (h *RandomHandler) Messages(w http.ResponseWriter, r *http.Request) {
 }
 
 type randomSendRequest struct {
-	Text string `json:"text"`
+	Text    string `json:"text"`
+	ReplyTo *int64 `json:"reply_to"`
 }
 
 func (h *RandomHandler) Send(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +158,7 @@ func (h *RandomHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	message, peerID, err := h.svc.Send(r.Context(), guestID, req.Text)
+	message, peerID, err := h.svc.Send(r.Context(), guestID, req.Text, req.ReplyTo)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmptyText):
@@ -166,6 +167,10 @@ func (h *RandomHandler) Send(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "text too long")
 		case errors.Is(err, service.ErrNoActiveSession):
 			writeError(w, http.StatusConflict, "no active session")
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden")
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusBadRequest, "reply target not found")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}
