@@ -314,3 +314,40 @@ func (h *AdminHandler) RandomSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, randomSessionDetailResponse{Session: sess, Messages: messages})
 }
+
+func (h *AdminHandler) DeleteRandomSession(w http.ResponseWriter, r *http.Request) {
+	if h.random == nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := h.random.DeleteEndedSession(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not found")
+		case errors.Is(err, repository.ErrConflict):
+			writeError(w, http.StatusConflict, "session active")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *AdminHandler) DeleteEndedRandomSessions(w http.ResponseWriter, r *http.Request) {
+	if h.random == nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	n, err := h.random.DeleteAllEndedSessions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "deleted": n})
+}

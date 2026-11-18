@@ -33,6 +33,8 @@ type RandomRepo interface {
 	ListMessages(ctx context.Context, sessionID int64, limit int) ([]domain.RandomMessage, error)
 	ListSessionsAdmin(ctx context.Context, status string, limit int, beforeID int64) ([]domain.RandomSessionAdmin, error)
 	GetSessionAdmin(ctx context.Context, id int64) (domain.RandomSessionAdmin, error)
+	DeleteEndedSession(ctx context.Context, id int64) error
+	DeleteAllEndedSessions(ctx context.Context) (int64, error)
 }
 
 func NewRandomRepository() *RandomRepository {
@@ -357,4 +359,81 @@ func (r *RandomRepository) GetSessionAdmin(ctx context.Context, id int64) (domai
 		return domain.RandomSessionAdmin{}, ErrNotFound
 	}
 	return s, err
+}
+
+func (r *RandomRepository) cleanupOrphanGuests(ctx context.Context, guestIDs ...string) {
+	for _, id := range guestIDs {
+		if id == "" {
+			continue
+		}
+		_, _ = r.db.Exec(ctx, `
+			DELETE FROM random.guests g
+			WHERE g.id = $1::uuid
+			  AND NOT EXISTS (
+				SELECT 1 FROM random.sessions s
+				WHERE s.guest_a = g.id OR s.guest_b = g.id
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM random.queue q WHERE q.guest_id = g.id
+			  )
+		`, id)
+	}
+}
+
+func (r *RandomRepository) DeleteEndedSession(ctx context.Context, id int64) error {
+	var guestA, guestB string
+	err := r.db.QueryRow(ctx, `
+		DELETE FROM random.sessions
+		WHERE id = $1 AND status = 'ended'
+		RETURNING guest_a::text, guest_b::text
+	`, id).Scan(&guestA, &guestB)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var status string
+		err2 := r.db.QueryRow(ctx, `SELECT status FROM random.sessions WHERE id = $1`, id).Scan(&status)
+		if errors.Is(err2, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err2 != nil {
+			return err2
+		}
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	r.cleanupOrphanGuests(ctx, guestA, guestB)
+	return nil
+}
+
+func (r *RandomRepository) DeleteAllEndedSessions(ctx context.Context) (int64, error) {
+	rows, err := r.db.Query(ctx, `
+		DELETE FROM random.sessions
+		WHERE status = 'ended'
+		RETURNING guest_a::text, guest_b::text
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	seen := make(map[string]struct{})
+	var n int64
+	for rows.Next() {
+		var a, b string
+		if err := rows.Scan(&a, &b); err != nil {
+			return n, err
+		}
+		n++
+		seen[a] = struct{}{}
+		seen[b] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return n, err
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	r.cleanupOrphanGuests(ctx, ids...)
+	return n, nil
 }

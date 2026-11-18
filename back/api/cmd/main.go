@@ -144,7 +144,9 @@ func main() {
 			r.Get("/feedback/unread", adminH.UnreadFeedback)
 			r.Post("/feedback/read", adminH.MarkFeedbackRead)
 			r.Get("/random/sessions", adminH.RandomSessions)
+			r.Delete("/random/sessions", adminH.DeleteEndedRandomSessions)
 			r.Get("/random/sessions/{id}", adminH.RandomSession)
+			r.Delete("/random/sessions/{id}", adminH.DeleteRandomSession)
 		})
 	})
 

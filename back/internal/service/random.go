@@ -205,3 +205,11 @@ func (s *RandomService) GetSessionAdmin(ctx context.Context, id int64) (domain.R
 	}
 	return sess, messages, nil
 }
+
+func (s *RandomService) DeleteEndedSession(ctx context.Context, id int64) error {
+	return s.repo.DeleteEndedSession(ctx, id)
+}
+
+func (s *RandomService) DeleteAllEndedSessions(ctx context.Context) (int64, error) {
+	return s.repo.DeleteAllEndedSessions(ctx)
+}

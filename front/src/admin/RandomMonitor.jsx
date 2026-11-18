@@ -22,6 +22,7 @@ export default function RandomMonitor({ wide = false }) {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const bottomRef = useRef(null);
   const selectedIdRef = useRef(null);
 
@@ -99,6 +100,63 @@ export default function RandomMonitor({ wide = false }) {
     setDetail(null);
   };
 
+  const deleteSession = async (id, e) => {
+    e?.stopPropagation?.();
+    if (deleting) return;
+    if (!window.confirm(`Видалити завершений чат #${id}?`)) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/admin/random/sessions/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error === "session active"
+          ? "Активний чат не можна видалити"
+          : (data.error || "Не вдалося видалити"));
+        return;
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      if (selectedIdRef.current === id) {
+        setSelectedId(null);
+        setDetail(null);
+      }
+    } catch {
+      setError("Не вдалося видалити");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deleteAllEnded = async () => {
+    if (deleting) return;
+    if (!window.confirm("Видалити всі завершені random-чати?")) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/admin/random/sessions`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Не вдалося очистити");
+        return;
+      }
+      if (detail?.session?.status === "ended" || status === "ended") {
+        setSelectedId(null);
+        setDetail(null);
+      }
+      await loadSessions();
+    } catch {
+      setError("Не вдалося очистити");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const tabs = [
     { id: "active", label: "Активні" },
     { id: "ended", label: "Завершені" },
@@ -137,6 +195,27 @@ export default function RandomMonitor({ wide = false }) {
         })}
       </div>
 
+      {(status === "ended" || status === "all") && sessions.some((s) => s.status === "ended") && (
+        <div style={{ padding: wide ? "0 12px" : 0 }}>
+          <button
+            type="button"
+            className="neu-press"
+            onClick={deleteAllEnded}
+            disabled={deleting}
+            style={{
+              width: "100%", padding: "10px 0", border: "none", borderRadius: 50,
+              background: NEU_BG, boxShadow: neu(false, 3, 6),
+              cursor: deleting ? "default" : "pointer",
+              fontFamily: "'Nunito', sans-serif",
+              fontSize: 12, fontWeight: 800, color: "#c084a0",
+              opacity: deleting ? 0.7 : 1,
+            }}
+          >
+            {deleting ? "Видалення..." : "Очистити всі завершені"}
+          </button>
+        </div>
+      )}
+
       {error && (
         <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center", padding: "0 8px" }}>
           {error}
@@ -156,46 +235,69 @@ export default function RandomMonitor({ wide = false }) {
           const active = selectedId === s.id;
           const isLive = s.status === "active";
           return (
-            <button
+            <div
               key={s.id}
-              type="button"
-              className="neu-press"
-              onClick={() => openSession(s.id)}
               style={{
-                width: "100%",
-                display: "flex", flexDirection: "column", gap: 4,
-                padding: "10px 12px", marginBottom: 8,
-                border: "none", borderRadius: 16,
-                background: NEU_BG,
-                boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
-                cursor: "pointer",
-                fontFamily: "'Nunito', sans-serif",
-                textAlign: "left",
+                display: "flex", alignItems: "stretch", gap: 6, marginBottom: 8,
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#4b5563" }}>
-                  #{s.id} · {guestTitle(s.guest_a)} × {guestTitle(s.guest_b)}
-                </span>
-                <span style={{
-                  fontSize: 10, fontWeight: 800, flexShrink: 0,
-                  color: isLive ? onlineColor("male") : "#9ca3af",
-                }}>
-                  {isLive ? "● live" : "ended"}
-                </span>
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af" }}>
-                {formatDateTime(s.last_message_at || s.created_at)} · {s.message_count} пов.
-              </div>
-              {s.last_text && (
-                <div style={{
-                  fontSize: 12, fontWeight: 600, color: "#6b7280",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {s.last_text}
+              <button
+                type="button"
+                className="neu-press"
+                onClick={() => openSession(s.id)}
+                style={{
+                  flex: 1, minWidth: 0,
+                  display: "flex", flexDirection: "column", gap: 4,
+                  padding: "10px 12px",
+                  border: "none", borderRadius: 16,
+                  background: NEU_BG,
+                  boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
+                  cursor: "pointer",
+                  fontFamily: "'Nunito', sans-serif",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#4b5563" }}>
+                    #{s.id} · {guestTitle(s.guest_a)} × {guestTitle(s.guest_b)}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 800, flexShrink: 0,
+                    color: isLive ? onlineColor("male") : "#9ca3af",
+                  }}>
+                    {isLive ? "● live" : "ended"}
+                  </span>
                 </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af" }}>
+                  {formatDateTime(s.last_message_at || s.created_at)} · {s.message_count} пов.
+                </div>
+                {s.last_text && (
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: "#6b7280",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {s.last_text}
+                  </div>
+                )}
+              </button>
+              {!isLive && (
+                <button
+                  type="button"
+                  className="neu-press"
+                  title="Видалити"
+                  disabled={deleting}
+                  onClick={(e) => deleteSession(s.id, e)}
+                  style={{
+                    width: 40, flexShrink: 0,
+                    border: "none", borderRadius: 16,
+                    background: NEU_BG, boxShadow: neu(false, 3, 6),
+                    cursor: deleting ? "default" : "pointer",
+                    fontFamily: "'Nunito', sans-serif",
+                    fontSize: 14, fontWeight: 800, color: "#c084a0",
+                  }}
+                >✕</button>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -245,6 +347,24 @@ export default function RandomMonitor({ wide = false }) {
                 {detail.session.status === "active" ? "● Активний чат · лише перегляд" : "Завершений · лише перегляд"}
               </div>
             </div>
+            {detail.session.status === "ended" && (
+              <button
+                type="button"
+                className="neu-press"
+                disabled={deleting}
+                onClick={(e) => deleteSession(detail.session.id, e)}
+                style={{
+                  padding: "9px 14px", border: "none", borderRadius: 50,
+                  background: NEU_BG, boxShadow: neu(false, 3, 6),
+                  cursor: deleting ? "default" : "pointer",
+                  fontFamily: "'Nunito', sans-serif",
+                  fontSize: 12, fontWeight: 800, color: "#c084a0",
+                  flexShrink: 0,
+                }}
+              >
+                {deleting ? "..." : "Видалити"}
+              </button>
+            )}
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", minHeight: wide ? 0 : 280 }}>
             {(detail.messages || []).length === 0 ? (
