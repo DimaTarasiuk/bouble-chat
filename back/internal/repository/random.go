@@ -13,8 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// randomMatchLockKey serializes matchmaking so two guests that enqueue at the
-// same moment always see each other instead of both skipping and waiting.
 const randomMatchLockKey = 7_100_001
 
 type RandomRepository struct {
@@ -78,10 +76,6 @@ func (r *RandomRepository) GetGuest(ctx context.Context, id string) (domain.Rand
 	return g, err
 }
 
-// Enqueue puts the guest into the queue and tries to pair it with the oldest
-// mutually compatible waiting guest. It returns the peer and the new session
-// ID on a match, or (nil, 0) when the guest is left waiting. If someone else
-// already matched this guest, the existing active session is returned.
 func (r *RandomRepository) Enqueue(ctx context.Context, g domain.RandomGuest) (*domain.RandomGuest, int64, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -154,7 +148,6 @@ func (r *RandomRepository) Dequeue(ctx context.Context, guestID string) error {
 	return err
 }
 
-// PruneQueue removes guests queued before queuedBefore that are not in keep.
 func (r *RandomRepository) PruneQueue(ctx context.Context, keep []string, queuedBefore time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		DELETE FROM random.queue

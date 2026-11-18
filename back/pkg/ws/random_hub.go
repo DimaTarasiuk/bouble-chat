@@ -9,9 +9,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// RandomHub keeps one socket per anonymous guest. When a guest disconnects and
-// does not come back within the grace period (e.g. a page reload), onGone is
-// called so the guest can be removed from the queue and its session ended.
 type RandomHub struct {
 	upgrader websocket.Upgrader
 	grace    time.Duration
@@ -90,8 +87,6 @@ func (h *RandomHub) startTimerLocked(guestID string) {
 	})
 }
 
-// ExpectReconnect starts the grace timer for a guest that is not connected,
-// e.g. the peer of a session restored after a server restart.
 func (h *RandomHub) ExpectReconnect(guestID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

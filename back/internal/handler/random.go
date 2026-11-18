@@ -202,8 +202,6 @@ func (h *RandomHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	h.hub.Serve(w, r, guestID)
 }
 
-// GuestGone is called by the hub once a guest's socket stays closed past the
-// grace period.
 func (h *RandomHandler) GuestGone(guestID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

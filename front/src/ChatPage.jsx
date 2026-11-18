@@ -67,12 +67,9 @@ const playNotification = (audioRef) => {
       playPromise.catch(() => {});
     }
   } catch {
-    // Ignore autoplay / media errors on mobile.
   }
 };
 
-// Pink unread counter. Pops (with a ripple ring) every time the count grows;
-// the number itself slides in on any change.
 function UnreadBadge({ count, small = false }) {
   const [prevCount, setPrevCount] = useState(count);
   const [pulse, setPulse] = useState(0);
@@ -1328,7 +1325,6 @@ export default function ChatPage({ onOpenRandom }) {
           if (prev.some(m => m.id === msg.id)) {
             return prev.map(m => (m.id === msg.id ? msg : m));
           }
-          // замінюємо тимчасове повідомлення на реальне
           const tempIndex = prev.findIndex(m =>
             typeof m.id === "string" && m.id.startsWith("temp-") && m.from === msg.from
           );
@@ -1413,7 +1409,6 @@ export default function ChatPage({ onOpenRandom }) {
       try {
         el.setSelectionRange(pos, pos);
       } catch {
-        // ignore
       }
     });
   };
@@ -1438,7 +1433,6 @@ export default function ChatPage({ onOpenRandom }) {
 
   const startReply = (msg) => {
     if (!msg || typeof msg.id !== "number") return;
-    // Reply only to the interlocutor's messages, never your own
     if (msg.from === username) return;
     setEditingId(null);
     setReplyTo({
@@ -1630,7 +1624,6 @@ export default function ChatPage({ onOpenRandom }) {
       if (!res.ok) return;
       openChat({ id: data.id, peer: data.peer, peer_gender: data.peer_gender || "" });
     } catch {
-      // ignore
     }
   };
   const openProfile = () => {
@@ -1813,7 +1806,6 @@ export default function ChatPage({ onOpenRandom }) {
 
   const chatBody = (
     <>
-          {/* Messages */}
           <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 80) loadOlder(); }} style={{
             flex: 1, overflowY: "auto",
             padding: "16px 18px",
@@ -1844,7 +1836,6 @@ export default function ChatPage({ onOpenRandom }) {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
           <div
             ref={emojiWrapRef}
             style={{
@@ -1990,7 +1981,6 @@ export default function ChatPage({ onOpenRandom }) {
               >😊</button>
             </div>
 
-            {/* кнопка відправки — повернули стилі і іконку */}
             <button
               className="neu-press neu-press-send"
               onClick={send}

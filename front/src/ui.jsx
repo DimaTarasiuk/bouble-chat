@@ -297,8 +297,6 @@ export function BooblifyLogo({ size } = {}) {
   );
 }
 
-// `mine` overrides the username comparison; `palette` ({ bg, shadow }) overrides
-// the default white/pink colors for both sides.
 export function Bubble({ msg, username, mine, palette, initials: initialsProp, animate = false, onEdit, onReply }) {
   const isMe = mine ?? msg.from === username;
   const canReply = !isMe && typeof onReply === "function";
@@ -336,7 +334,6 @@ export function Bubble({ msg, username, mine, palette, initials: initialsProp, a
 
   const onPointerDown = (e) => {
     if (e.button != null && e.button !== 0) return;
-    // Own messages: capture for long-press edit only. Reply capture starts on confirmed drag.
     if (isMe) {
       e.currentTarget.setPointerCapture?.(e.pointerId);
     }
@@ -365,7 +362,6 @@ export function Bubble({ msg, username, mine, palette, initials: initialsProp, a
   const onPointerMove = (e) => {
     const start = startRef.current;
     if (!start.active || start.replied || !canReply) return;
-    // Ignore hover / move without primary button (mouse false triggers)
     if (e.pointerType === "mouse" && (e.buttons & 1) !== 1) return;
 
     const dx = e.clientX - start.x;
@@ -375,7 +371,6 @@ export function Bubble({ msg, username, mine, palette, initials: initialsProp, a
       if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
         clearLongPress();
       }
-      // only start reply-drag when clearly horizontal right swipe
       if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
         start.dragging = true;
         setDragging(true);
@@ -383,7 +378,6 @@ export function Bubble({ msg, username, mine, palette, initials: initialsProp, a
         try {
           e.currentTarget.setPointerCapture?.(e.pointerId);
         } catch {
-          // ignore
         }
       } else {
         return;
@@ -407,7 +401,6 @@ export function Bubble({ msg, username, mine, palette, initials: initialsProp, a
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
     } catch {
-      // ignore
     }
     resetDrag();
   };

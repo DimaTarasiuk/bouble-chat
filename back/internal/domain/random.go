@@ -13,14 +13,12 @@ const (
 	RandomMaxAge        = 99
 )
 
-// RandomAgeBand is an allowed own-age preset shown in the UI.
 type RandomAgeBand struct {
 	Min   int
 	Max   int
 	Label string
 }
 
-// RandomAgeBands are the only valid own-age ranges.
 var RandomAgeBands = []RandomAgeBand{
 	{Min: 18, Max: 22, Label: "18-22"},
 	{Min: 23, Max: 28, Label: "23-28"},
@@ -64,7 +62,6 @@ type RandomGuest struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// RandomSession is always built from the point of view of one participant.
 type RandomSession struct {
 	ID         int64     `json:"id"`
 	PeerGender string    `json:"peer_gender"`

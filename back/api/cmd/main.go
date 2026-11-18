@@ -275,8 +275,6 @@ func recordOnlineSnapshots(ctx context.Context, svc *service.AdminService, hub *
 
 const randomReconnectGrace = 15 * time.Second
 
-// pruneRandomQueue drops queued guests without a live socket. The first run
-// clears everyone left over from before a restart.
 func pruneRandomQueue(ctx context.Context, svc *service.RandomService, hub *ws.RandomHub) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()

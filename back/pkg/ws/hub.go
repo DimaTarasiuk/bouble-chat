@@ -18,7 +18,6 @@ const (
 	pingPeriod     = pongWait * 9 / 10
 	maxMessageSize = 4096
 
-	// AuthSubprotocol is the Sec-WebSocket-Protocol value that must precede the token.
 	AuthSubprotocol = "bearer"
 )
 
@@ -36,7 +35,7 @@ type Client struct {
 	release        func()
 	conn           *websocket.Conn
 	send           chan []byte
-	conversationID int64 // 0 = presence-only
+	conversationID int64
 	userID         int64
 	username       string
 	guestID        string
@@ -84,7 +83,6 @@ func NewHub(checkOrigin func(r *http.Request) bool, onOnline, onOffline func(use
 	}
 }
 
-// TokenFromRequest extracts the token sent as `Sec-WebSocket-Protocol: bearer, <token>`.
 func TokenFromRequest(r *http.Request) string {
 	protocols := websocket.Subprotocols(r)
 	for i := 0; i+1 < len(protocols); i++ {

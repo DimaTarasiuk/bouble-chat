@@ -41,7 +41,6 @@ function saveAnonId(id) {
   try {
     localStorage.setItem(RANDOM_ANON_KEY, id);
   } catch {
-    // ignore quota / private mode
   }
 }
 const MIN_AGE = 18;
@@ -280,7 +279,6 @@ export default function RandomPage({ onOpenAccount }) {
     setPhase("searching");
     const res = await api("POST", "/api/random/search", token);
     if (res.status === 401) return expire();
-    // 409: the socket is not open yet; the reconnect effect retries the search.
     if (res.status === 409) return;
     if (!res.ok) {
       setError("Не вдалося почати пошук");
@@ -324,7 +322,6 @@ export default function RandomPage({ onOpenAccount }) {
         try {
           onEvent(JSON.parse(e.data));
         } catch {
-          // ignore malformed frames
         }
       };
       ws.onclose = async () => {
@@ -350,7 +347,6 @@ export default function RandomPage({ onOpenAccount }) {
     };
   }, [token, expire]);
 
-  // Each (re)connect restores the active chat or resumes the search.
   useEffect(() => {
     if (!connected || !token) return undefined;
     let cancelled = false;

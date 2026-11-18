@@ -97,7 +97,6 @@ type MatchResult struct {
 	Peer domain.RandomSession
 }
 
-// Search returns nil when the guest is left waiting in the queue.
 func (s *RandomService) Search(ctx context.Context, guestID string) (*MatchResult, error) {
 	guest, err := s.repo.GetGuest(ctx, guestID)
 	if err != nil {
@@ -118,8 +117,6 @@ func (s *RandomService) Cancel(ctx context.Context, guestID string) error {
 	return s.repo.Dequeue(ctx, guestID)
 }
 
-// Leave takes the guest out of the queue and ends its active session.
-// It returns the ended session, or ErrNoActiveSession if there was none.
 func (s *RandomService) Leave(ctx context.Context, guestID string) (domain.RandomSession, error) {
 	if err := s.repo.Dequeue(ctx, guestID); err != nil {
 		return domain.RandomSession{}, err
@@ -154,7 +151,6 @@ func (s *RandomService) History(ctx context.Context, guestID string) (domain.Ran
 	return sess, messages, nil
 }
 
-// Send stores a message and returns it as seen by the sender, plus the peer ID.
 func (s *RandomService) Send(ctx context.Context, guestID, text string, replyToID *int64) (domain.RandomMessage, string, error) {
 	text, err := validateText(text)
 	if err != nil {
