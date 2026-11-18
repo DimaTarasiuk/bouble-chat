@@ -24,7 +24,7 @@ const RECONNECT_MS = 1500;
 const MIN_AGE = 18;
 const MAX_AGE = 99;
 
-const EMPTY_FORM = { gender: "", age: "", seek_gender: "", seek_age_min: "18", seek_age_max: "35" };
+const EMPTY_FORM = { gender: "", age_band: "", seek_gender: "", seek_age_min: "18", seek_age_max: "35" };
 
 const MY_GENDER_OPTIONS = [
   { value: "male", label: "Чоловік" },
@@ -37,6 +37,15 @@ const SEEK_GENDER_OPTIONS = [
   { value: "any", label: "Будь-кого" },
 ];
 
+const AGE_BANDS = [
+  { value: "18-22", label: "18-22", min: 18, max: 22 },
+  { value: "23-28", label: "23-28", min: 23, max: 28 },
+  { value: "28-30+", label: "28-30+", min: 28, max: MAX_AGE },
+];
+
+const ageBandByValue = (value) => AGE_BANDS.find((b) => b.value === value) || null;
+const ageBandByRange = (min, max) => AGE_BANDS.find((b) => b.min === min && b.max === max) || null;
+
 const genderSign = (gender) => (gender === "female" ? "♀" : "♂");
 const peerTitle = (session) => `${session.peer_gender === "female" ? "Вона" : "Він"}, ${session.peer_age}`;
 
@@ -44,9 +53,10 @@ function loadForm() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(RANDOM_PREFS_KEY));
     if (!saved) return EMPTY_FORM;
+    const band = ageBandByRange(saved.age_min, saved.age_max);
     return {
       gender: saved.gender || "",
-      age: String(saved.age ?? ""),
+      age_band: band?.value || "",
       seek_gender: saved.seek_gender || "",
       seek_age_min: String(saved.seek_age_min ?? EMPTY_FORM.seek_age_min),
       seek_age_max: String(saved.seek_age_max ?? EMPTY_FORM.seek_age_max),
@@ -61,17 +71,32 @@ function parseAge(raw) {
   return Number.isInteger(n) && n >= MIN_AGE && n <= MAX_AGE ? n : null;
 }
 
-function validateForm(form, adult) {
+function clampSeekAge(raw) {
+  if (raw === "" || raw == null) return String(MIN_AGE);
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return String(MIN_AGE);
+  return String(Math.min(MAX_AGE, Math.max(MIN_AGE, Math.trunc(n))));
+}
+
+function validateForm(form) {
   if (!form.gender) return { error: "Оберіть свою стать" };
-  const age = parseAge(form.age);
-  if (age === null) return { error: `Ваш вік — від ${MIN_AGE} до ${MAX_AGE}` };
+  const band = ageBandByValue(form.age_band);
+  if (!band) return { error: "Оберіть свій вік" };
   if (!form.seek_gender) return { error: "Оберіть, кого шукаєте" };
   const min = parseAge(form.seek_age_min);
   const max = parseAge(form.seek_age_max);
   if (min === null || max === null) return { error: `Вік співрозмовника — від ${MIN_AGE} до ${MAX_AGE}` };
   if (min > max) return { error: "Вік «від» більший за «до»" };
-  if (!adult) return { error: "Підтвердіть, що вам є 18 років" };
-  return { prefs: { gender: form.gender, age, seek_gender: form.seek_gender, seek_age_min: min, seek_age_max: max } };
+  return {
+    prefs: {
+      gender: form.gender,
+      age_min: band.min,
+      age_max: band.max,
+      seek_gender: form.seek_gender,
+      seek_age_min: min,
+      seek_age_max: max,
+    },
+  };
 }
 
 async function api(method, path, token, body) {
@@ -160,7 +185,6 @@ export default function RandomPage({ onOpenAccount }) {
   const [token, setToken] = useState(() => sessionStorage.getItem(RANDOM_TOKEN_KEY));
   const [phase, setPhase] = useState(() => (sessionStorage.getItem(RANDOM_TOKEN_KEY) ? "searching" : "form"));
   const [form, setForm] = useState(loadForm);
-  const [adult, setAdult] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
 
@@ -289,7 +313,15 @@ export default function RandomPage({ onOpenAccount }) {
   }, [connected, token, expire, search]);
 
   const start = async () => {
-    const { prefs, error: formError } = validateForm(form, adult);
+    const next = {
+      ...form,
+      seek_age_min: clampSeekAge(form.seek_age_min),
+      seek_age_max: clampSeekAge(form.seek_age_max),
+    };
+    if (next.seek_age_min !== form.seek_age_min || next.seek_age_max !== form.seek_age_max) {
+      setForm(next);
+    }
+    const { prefs, error: formError } = validateForm(next);
     if (formError) {
       setError(formError);
       return;
@@ -343,6 +375,8 @@ export default function RandomPage({ onOpenAccount }) {
   };
 
   const setField = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+  const setSeekAge = (key) => (e) => setField(key)(e.target.value);
+  const clampSeekField = (key) => () => setForm((f) => ({ ...f, [key]: clampSeekAge(f[key]) }));
   const onFormKey = (e) => { if (e.key === "Enter") start(); };
 
   const card = {
@@ -405,7 +439,7 @@ export default function RandomPage({ onOpenAccount }) {
         <Chips options={MY_GENDER_OPTIONS} value={form.gender} onChange={setField("gender")} />
 
         <label style={labelStyle}>Мій вік</label>
-        <NeuField type="number" value={form.age} onChange={(e) => setField("age")(e.target.value)} onKey={onFormKey} placeholder="Наприклад, 25" />
+        <Chips options={AGE_BANDS} value={form.age_band} onChange={setField("age_band")} />
 
         <label style={{ ...labelStyle, marginTop: 8 }}>Шукаю</label>
         <Chips options={SEEK_GENDER_OPTIONS} value={form.seek_gender} onChange={setField("seek_gender")} />
@@ -413,29 +447,38 @@ export default function RandomPage({ onOpenAccount }) {
         <label style={labelStyle}>Вік співрозмовника</label>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <NeuField type="number" value={form.seek_age_min} onChange={(e) => setField("seek_age_min")(e.target.value)} onKey={onFormKey} placeholder="від" />
+            <NeuField
+              type="number"
+              value={form.seek_age_min}
+              onChange={setSeekAge("seek_age_min")}
+              onBlur={clampSeekField("seek_age_min")}
+              onKey={onFormKey}
+              min={MIN_AGE}
+              max={MAX_AGE}
+              placeholder="від"
+            />
           </div>
           <span style={{ fontWeight: 800, color: "#9ca3af" }}>—</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <NeuField type="number" value={form.seek_age_max} onChange={(e) => setField("seek_age_max")(e.target.value)} onKey={onFormKey} placeholder="до" />
+            <NeuField
+              type="number"
+              value={form.seek_age_max}
+              onChange={setSeekAge("seek_age_max")}
+              onBlur={clampSeekField("seek_age_max")}
+              onKey={onFormKey}
+              min={MIN_AGE}
+              max={MAX_AGE}
+              placeholder="до"
+            />
           </div>
         </div>
-
-        <label style={{
-          display: "flex", alignItems: "center", gap: 10,
-          marginTop: 8, padding: "0 8px",
-          fontSize: 13, fontWeight: 700, color: "#6b7280", cursor: "pointer",
-        }}>
-          <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#6b8fb5" }} />
-          Мені є 18 років
-        </label>
 
         {error && (
           <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center", marginTop: 4 }}>{error}</div>
         )}
 
         <PillButton primary onClick={start} disabled={starting} style={{ width: "100%", marginTop: 8 }}>
-          {starting ? "Починаємо..." : "Знайти співрозмовника →"}
+          {starting ? "Починаємо..." : "Знайти співрозмовника"}
         </PillButton>
       </div>
     </div>

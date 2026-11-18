@@ -4,11 +4,13 @@ CREATE SCHEMA IF NOT EXISTS random;
 CREATE TABLE random.guests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   gender TEXT NOT NULL CHECK (gender IN ('male', 'female')),
-  age INT NOT NULL CHECK (age BETWEEN 18 AND 99),
+  age_min INT NOT NULL CHECK (age_min BETWEEN 18 AND 99),
+  age_max INT NOT NULL CHECK (age_max BETWEEN 18 AND 99),
   seek_gender TEXT NOT NULL CHECK (seek_gender IN ('male', 'female', 'any')),
   seek_age_min INT NOT NULL CHECK (seek_age_min BETWEEN 18 AND 99),
   seek_age_max INT NOT NULL CHECK (seek_age_max BETWEEN 18 AND 99),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (age_min <= age_max),
   CHECK (seek_age_min <= seek_age_max)
 );
 

@@ -51,20 +51,20 @@ func (r *RandomRepository) Close() {
 	r.db.Close()
 }
 
-const guestColumns = `g.id::text, g.gender, g.age, g.seek_gender, g.seek_age_min, g.seek_age_max, g.created_at`
+const guestColumns = `g.id::text, g.gender, g.age_min, g.age_max, g.seek_gender, g.seek_age_min, g.seek_age_max, g.created_at`
 
 func scanGuest(row pgx.Row) (domain.RandomGuest, error) {
 	var g domain.RandomGuest
-	err := row.Scan(&g.ID, &g.Gender, &g.Age, &g.SeekGender, &g.SeekAgeMin, &g.SeekAgeMax, &g.CreatedAt)
+	err := row.Scan(&g.ID, &g.Gender, &g.AgeMin, &g.AgeMax, &g.SeekGender, &g.SeekAgeMin, &g.SeekAgeMax, &g.CreatedAt)
 	return g, err
 }
 
 func (r *RandomRepository) CreateGuest(ctx context.Context, p domain.RandomPrefs) (domain.RandomGuest, error) {
 	return scanGuest(r.db.QueryRow(ctx, `
-		INSERT INTO random.guests AS g (gender, age, seek_gender, seek_age_min, seek_age_max)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO random.guests AS g (gender, age_min, age_max, seek_gender, seek_age_min, seek_age_max)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+guestColumns,
-		p.Gender, p.Age, p.SeekGender, p.SeekAgeMin, p.SeekAgeMax))
+		p.Gender, p.AgeMin, p.AgeMax, p.SeekGender, p.SeekAgeMin, p.SeekAgeMax))
 }
 
 func (r *RandomRepository) GetGuest(ctx context.Context, id string) (domain.RandomGuest, error) {
@@ -116,12 +116,12 @@ func (r *RandomRepository) Enqueue(ctx context.Context, g domain.RandomGuest) (*
 		JOIN random.guests g ON g.id = q.guest_id
 		WHERE q.guest_id <> $1::uuid
 		  AND ($2 = 'any' OR g.gender = $2)
-		  AND g.age BETWEEN $3 AND $4
+		  AND g.age_min <= $4 AND g.age_max >= $3
 		  AND (g.seek_gender = 'any' OR g.seek_gender = $5)
-		  AND $6 BETWEEN g.seek_age_min AND g.seek_age_max
+		  AND $6 <= g.seek_age_max AND $7 >= g.seek_age_min
 		ORDER BY q.created_at
 		LIMIT 1
-	`, g.ID, g.SeekGender, g.SeekAgeMin, g.SeekAgeMax, g.Gender, g.Age))
+	`, g.ID, g.SeekGender, g.SeekAgeMin, g.SeekAgeMax, g.Gender, g.AgeMin, g.AgeMax))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO random.queue (guest_id) VALUES ($1::uuid) ON CONFLICT (guest_id) DO NOTHING
@@ -163,17 +163,22 @@ func (r *RandomRepository) PruneQueue(ctx context.Context, keep []string, queued
 }
 
 const sessionSelect = `
-	SELECT s.id, s.status, s.created_at, p.id::text, p.gender, p.age
+	SELECT s.id, s.status, s.created_at, p.id::text, p.gender, p.age_min, p.age_max
 	FROM random.sessions s
 	JOIN random.guests p ON p.id = CASE WHEN s.guest_a = $1::uuid THEN s.guest_b ELSE s.guest_a END`
 
 func scanSession(row pgx.Row) (domain.RandomSession, error) {
 	var s domain.RandomSession
-	err := row.Scan(&s.ID, &s.Status, &s.CreatedAt, &s.PeerID, &s.PeerGender, &s.PeerAge)
+	var ageMin, ageMax int
+	err := row.Scan(&s.ID, &s.Status, &s.CreatedAt, &s.PeerID, &s.PeerGender, &ageMin, &ageMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.RandomSession{}, ErrNotFound
 	}
-	return s, err
+	if err != nil {
+		return domain.RandomSession{}, err
+	}
+	s.PeerAge = domain.FormatAgeBand(ageMin, ageMax)
+	return s, nil
 }
 
 func (r *RandomRepository) ActiveSession(ctx context.Context, guestID string) (domain.RandomSession, error) {
@@ -190,7 +195,7 @@ func (r *RandomRepository) EndActiveSession(ctx context.Context, guestID string)
 			WHERE status = 'active' AND (guest_a = $1::uuid OR guest_b = $1::uuid)
 			RETURNING id, status, created_at, guest_a, guest_b
 		)
-		SELECT s.id, s.status, s.created_at, p.id::text, p.gender, p.age
+		SELECT s.id, s.status, s.created_at, p.id::text, p.gender, p.age_min, p.age_max
 		FROM s
 		JOIN random.guests p ON p.id = CASE WHEN s.guest_a = $1::uuid THEN s.guest_b ELSE s.guest_a END
 	`, guestID))

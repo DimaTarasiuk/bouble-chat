@@ -26,7 +26,7 @@ export function Avatar({ initials, color }) {
   );
 }
 
-export function NeuField({ type = "text", value, onChange, placeholder, onKey, autoFocus }) {
+export function NeuField({ type = "text", value, onChange, placeholder, onKey, onBlur, autoFocus, min, max }) {
   const [visible, setVisible] = useState(false);
   const isPassword = type === "password";
 
@@ -44,8 +44,11 @@ export function NeuField({ type = "text", value, onChange, placeholder, onKey, a
         value={value}
         onChange={onChange}
         onKeyDown={onKey}
+        onBlur={onBlur}
         placeholder={placeholder}
         autoFocus={autoFocus}
+        min={min}
+        max={max}
         autoComplete={isPassword ? "current-password" : undefined}
         style={{
           flex: 1,
@@ -111,6 +114,15 @@ export function AppStyles() {
       @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { background: ${NEU_BG}; }
+      input[type=number]::-webkit-outer-spin-button,
+      input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
       ::-webkit-scrollbar { width: 0; }
       @media ${DESKTOP_QUERY} {
         ::-webkit-scrollbar { width: 6px; }

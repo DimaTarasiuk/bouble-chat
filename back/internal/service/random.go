@@ -33,7 +33,7 @@ func validAge(a int) bool {
 }
 
 func validatePrefs(p domain.RandomPrefs) error {
-	if !validGender(p.Gender) || !validAge(p.Age) {
+	if !validGender(p.Gender) || !domain.ValidAgeBand(p.AgeMin, p.AgeMax) {
 		return ErrInvalidPrefs
 	}
 	if p.SeekGender != domain.SeekAny && !validGender(p.SeekGender) {
@@ -43,6 +43,17 @@ func validatePrefs(p domain.RandomPrefs) error {
 		return ErrInvalidPrefs
 	}
 	return nil
+}
+
+func sessionFromPeer(sessionID int64, peer domain.RandomGuest, at time.Time) domain.RandomSession {
+	return domain.RandomSession{
+		ID:         sessionID,
+		PeerID:     peer.ID,
+		PeerGender: peer.Gender,
+		PeerAge:    domain.FormatAgeBand(peer.AgeMin, peer.AgeMax),
+		Status:     domain.RandomSessionActive,
+		CreatedAt:  at,
+	}
 }
 
 func (s *RandomService) Start(ctx context.Context, prefs domain.RandomPrefs) (domain.RandomGuest, error) {
@@ -69,14 +80,8 @@ func (s *RandomService) Search(ctx context.Context, guestID string) (*MatchResul
 	}
 	now := time.Now().UTC()
 	return &MatchResult{
-		Mine: domain.RandomSession{
-			ID: sessionID, PeerID: peer.ID, PeerGender: peer.Gender, PeerAge: peer.Age,
-			Status: domain.RandomSessionActive, CreatedAt: now,
-		},
-		Peer: domain.RandomSession{
-			ID: sessionID, PeerID: guest.ID, PeerGender: guest.Gender, PeerAge: guest.Age,
-			Status: domain.RandomSessionActive, CreatedAt: now,
-		},
+		Mine: sessionFromPeer(sessionID, *peer, now),
+		Peer: sessionFromPeer(sessionID, guest, now),
 	}, nil
 }
 
