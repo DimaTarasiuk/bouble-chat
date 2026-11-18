@@ -50,17 +50,11 @@ const genderSign = (gender) => (gender === "female" ? "♀" : "♂");
 const genderLabel = (gender) => (gender === "female" ? "Вона" : "Він");
 
 const MALE_NICKS = [
-  "Тіньовий Лис", "Кавовий Хаос", "Нічний Орбіт", "Мовчазний Грім",
-  "Синій Койот", "Піксельний Вовк", "Тихий Метеор", "Дикий Байт",
-  "Міський Яструб", "Крижаний Драйв", "Чорний Еспресо", "Ретро Кіт",
-  "Сірий Комета", "Бунт і Бас", "Лісовий Модем", "Північний Дрон",
+  "Рандомний кіт", "Милий кіт", "Няшний кіт", "Дворовий кіт",
 ];
 
 const FEMALE_NICKS = [
-  "Місячна Лисиця", "Цукрова Буря", "Нічна Орхідея", "Тиха Комета",
-  "Рожева Іскра", "Океанська Мрія", "Дика Ваніль", "Срібна Луна",
-  "Кавова Фея", "Піксельна Муза", "Туманна Зірка", "М’ятна Хвиля",
-  "Золота Нота", "Лісова Іскра", "Неонова Киця", "Ранкова Злива",
+  "Рандомна кицька", "Мила кицька", "Няшна кицька", "Дворова кицька",
 ];
 
 function peerNick(session) {
@@ -215,6 +209,7 @@ export default function RandomPage({ onOpenAccount }) {
   const [phase, setPhase] = useState(() => (sessionStorage.getItem(RANDOM_TOKEN_KEY) ? "searching" : "form"));
   const [form, setForm] = useState(loadForm);
   const [starting, setStarting] = useState(false);
+  const [confirmNext, setConfirmNext] = useState(false);
   const [error, setError] = useState("");
 
   const [connected, setConnected] = useState(false);
@@ -244,6 +239,7 @@ export default function RandomPage({ onOpenAccount }) {
     setReplyTo(null);
     setInput("");
     setEmojiOpen(false);
+    setConfirmNext(false);
     setPhase("form");
     setError(message);
   }, []);
@@ -389,6 +385,7 @@ export default function RandomPage({ onOpenAccount }) {
   };
 
   const next = async () => {
+    setConfirmNext(false);
     await api("POST", "/api/random/skip", token);
     search();
   };
@@ -583,7 +580,7 @@ export default function RandomPage({ onOpenAccount }) {
         </div>
       </div>
       {phase === "chat" && (
-        <PillButton primary onClick={next} style={{ marginLeft: "auto", padding: "9px 16px", fontSize: 13 }}>
+        <PillButton primary onClick={() => setConfirmNext(true)} style={{ marginLeft: "auto", padding: "9px 16px", fontSize: 13 }}>
           Далі →
         </PillButton>
       )}
@@ -784,6 +781,53 @@ export default function RandomPage({ onOpenAccount }) {
   if (phase === "searching") body = searchingView;
   else if ((phase === "chat" || phase === "peerLeft") && session) body = chatView;
 
+  const confirmNextModal = confirmNext && (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 100,
+      background: "rgba(75, 85, 99, 0.25)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-next-title"
+        style={{
+          width: "100%",
+          maxWidth: 320,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          padding: "24px 22px",
+          borderRadius: 24,
+          background: NEU_BG,
+          boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
+          fontFamily: "'Nunito', sans-serif",
+          animation: "fadeUp 0.2s ease both",
+        }}
+      >
+        <div id="confirm-next-title" style={{ fontSize: 16, fontWeight: 800, color: "#4b5563", textAlign: "center" }}>
+          Завершити цей чат?
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#6b7280", textAlign: "center", lineHeight: 1.45 }}>
+          Поточну розмову буде завершено, і ми пошукаємо нового співрозмовника.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+          <PillButton onClick={() => setConfirmNext(false)} style={{ flex: 1 }}>
+            Скасувати
+          </PillButton>
+          <PillButton primary onClick={next} style={{ flex: 1 }}>
+            Так, далі
+          </PillButton>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <AppStyles />
@@ -799,6 +843,7 @@ export default function RandomPage({ onOpenAccount }) {
           {body}
         </div>
       </div>
+      {confirmNextModal}
     </>
   );
 }
