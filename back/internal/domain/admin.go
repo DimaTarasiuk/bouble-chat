@@ -32,14 +32,20 @@ type OnlinePoint struct {
 	Count int       `json:"count"`
 }
 
+type DayCount struct {
+	Date  string `json:"date"`
+	Count int    `json:"count"`
+}
+
 type Stats struct {
-	TotalUsers    int           `json:"total_users"`
-	OnlineNow     int           `json:"online_now"`
-	DAU           int           `json:"dau"`
-	Registrations PeriodCounts  `json:"registrations"`
-	Messages      PeriodCounts  `json:"messages"`
-	TopUsers      []TopUser     `json:"top_users"`
-	OnlineSeries  []OnlinePoint `json:"online_series"`
+	TotalUsers         int           `json:"total_users"`
+	OnlineNow          int           `json:"online_now"`
+	DAU                int           `json:"dau"`
+	Registrations      PeriodCounts  `json:"registrations"`
+	Messages           PeriodCounts  `json:"messages"`
+	TopUsers           []TopUser     `json:"top_users"`
+	OnlineSeries       []OnlinePoint `json:"online_series"`
+	RegistrationsByDay []DayCount    `json:"registrations_by_day"`
 }
 
 type Registration struct {

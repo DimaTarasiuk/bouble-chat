@@ -118,7 +118,7 @@ func (r *AdminRepository) Stats(ctx context.Context, onlineUserIDs []int64) (dom
 		  COUNT(*) FILTER (WHERE created_at >= `+todayStartSQL+`)::int,
 		  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int,
 		  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int,
-		  COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '24 hours' OR id = ANY($1))::int
+		  COUNT(*) FILTER (WHERE last_seen_at >= `+todayStartSQL+` OR id = ANY($1))::int
 		FROM users
 	`, onlineUserIDs).Scan(
 		&s.TotalUsers,
@@ -177,13 +177,38 @@ func (r *AdminRepository) Stats(ctx context.Context, onlineUserIDs []int64) (dom
 	if err != nil {
 		return domain.Stats{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var p domain.OnlinePoint
 		if err := rows.Scan(&p.At, &p.Count); err != nil {
+			rows.Close()
 			return domain.Stats{}, err
 		}
 		s.OnlineSeries = append(s.OnlineSeries, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return domain.Stats{}, err
+	}
+
+	s.RegistrationsByDay = make([]domain.DayCount, 0)
+	rows, err = r.db.Query(ctx, `
+		SELECT to_char(created_at AT TIME ZONE 'Europe/Kyiv', 'YYYY-MM-DD') AS day,
+		       COUNT(*)::int
+		FROM users
+		WHERE created_at >= `+todayStartSQL+` - INTERVAL '29 days'
+		GROUP BY 1
+		ORDER BY 1
+	`)
+	if err != nil {
+		return domain.Stats{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d domain.DayCount
+		if err := rows.Scan(&d.Date, &d.Count); err != nil {
+			return domain.Stats{}, err
+		}
+		s.RegistrationsByDay = append(s.RegistrationsByDay, d)
 	}
 	return s, rows.Err()
 }

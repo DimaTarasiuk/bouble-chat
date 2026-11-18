@@ -58,10 +58,11 @@ type Hub struct {
 	onlineReq   chan chan onlineSnapshot
 	register    chan *Client
 	unregister  chan *Client
+	onOnline    func(userID int64)
 	onOffline   func(userID int64)
 }
 
-func NewHub(checkOrigin func(r *http.Request) bool, onOffline func(userID int64)) *Hub {
+func NewHub(checkOrigin func(r *http.Request) bool, onOnline, onOffline func(userID int64)) *Hub {
 	return &Hub{
 		upgrader: websocket.Upgrader{
 			CheckOrigin:  checkOrigin,
@@ -77,6 +78,7 @@ func NewHub(checkOrigin func(r *http.Request) bool, onOffline func(userID int64)
 		onlineReq:   make(chan chan onlineSnapshot, 16),
 		register:    make(chan *Client, 64),
 		unregister:  make(chan *Client, 64),
+		onOnline:    onOnline,
 		onOffline:   onOffline,
 	}
 }
@@ -151,6 +153,10 @@ func (h *Hub) Run(ctx context.Context) {
 			log.Printf("Client registered (%s). Total clients: %d", client.username, len(h.clients))
 			if wasOffline {
 				h.fanoutPresence(client.username, true)
+				if h.onOnline != nil {
+					userID := client.userID
+					go h.onOnline(userID)
+				}
 			}
 			if client.conversationID == 0 {
 				h.sendSnapshot(client)

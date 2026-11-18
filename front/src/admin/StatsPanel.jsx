@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { API_URL, authHeaders, NEU_BG, neu, onlineColor } from "../shared.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TZ = "Europe/Kyiv";
 const ACCENT = "#6b8fb5";
 const PINK = "#c084a0";
 const MUTED = "#9ca3af";
@@ -10,17 +11,43 @@ const RECENT_PREVIEW = 10;
 const boxStyle = { borderRadius: 18, boxShadow: neu(true, 3, 6), padding: "10px 12px" };
 
 const pad2 = (n) => String(n).padStart(2, "0");
-const dayKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const dayLabel = (d) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}`;
-const timeLabel = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+const kyivParts = (d) => {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return Object.fromEntries(
+    fmt.formatToParts(d).filter((p) => p.type !== "literal").map((p) => [p.type, p.value]),
+  );
+};
+
+const dayKey = (d) => {
+  const p = kyivParts(d);
+  return `${p.year}-${p.month}-${p.day}`;
+};
+const dayLabel = (d) => {
+  const p = kyivParts(d);
+  return `${p.day}.${p.month}`;
+};
+const timeLabel = (d) => {
+  const p = kyivParts(d);
+  return `${p.hour}:${p.minute}`;
+};
 
 function buildDays(now, count) {
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
+  const todayKey = dayKey(new Date(now || Date.now()));
+  const [y, m, d] = todayKey.split("-").map(Number);
   return Array.from({ length: count }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - (count - 1 - i));
-    return { key: dayKey(d), date: d };
+    const offset = count - 1 - i;
+    const dt = new Date(Date.UTC(y, m - 1, d - offset, 12, 0, 0));
+    const key = `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+    return { key, date: dt };
   });
 }
 
@@ -289,17 +316,16 @@ export default function StatsPanel({ wide = false }) {
 
   const fetchedAt = stats?.fetchedAt;
   const days = useMemo(
-    () => buildDays(fetchedAt ?? 0, wide ? 30 : 14),
+    () => buildDays(fetchedAt ?? Date.now(), wide ? 30 : 14),
     [fetchedAt, wide],
   );
   const counts = useMemo(() => {
     const m = new Map();
-    for (const r of regs) {
-      const k = dayKey(new Date(r.created_at));
-      m.set(k, (m.get(k) || 0) + 1);
+    for (const row of stats?.registrations_by_day || []) {
+      m.set(row.date, row.count);
     }
     return m;
-  }, [regs]);
+  }, [stats]);
 
   const firstDay = days[0]?.key;
   const listRegs = useMemo(
@@ -314,7 +340,9 @@ export default function StatsPanel({ wide = false }) {
   const regsTitle = (
     <SectionTitle right={
       <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>
-        {selectedDate ? `${dayLabel(selectedDate)} · ${listRegs.length}` : "натисніть на стовпчик"}
+        {selectedDate
+          ? `${dayLabel(selectedDate)} · ${counts.get(selectedDay) || 0}`
+          : "натисніть на стовпчик"}
       </span>
     }>
       Реєстрації за {days.length} днів

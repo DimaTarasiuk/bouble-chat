@@ -61,11 +61,12 @@ func main() {
 		}
 	}
 
-	hub := ws.NewHub(originChecker(allowedOrigins), func(userID int64) {
+	touchLastSeen := func(userID int64) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = authSvc.TouchLastSeen(ctx, userID)
-	})
+	}
+	hub := ws.NewHub(originChecker(allowedOrigins), touchLastSeen, touchLastSeen)
 	go hub.Run(ctx)
 	go recordOnlineSnapshots(ctx, adminSvc, hub)
 
