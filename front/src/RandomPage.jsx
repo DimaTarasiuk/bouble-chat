@@ -117,6 +117,15 @@ async function api(method, path, token, body) {
 }
 
 const labelStyle = { fontSize: 11, fontWeight: 700, color: "#9ca3af", paddingLeft: 8 };
+const sectionStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  padding: "14px 14px 16px",
+  borderRadius: 22,
+  background: NEU_BG,
+  boxShadow: neu(false, 4, 10),
+};
 
 function Chips({ options, value, onChange }) {
   return (
@@ -430,46 +439,48 @@ export default function RandomPage({ onOpenAccount }) {
       flexDirection: "column",
       alignItems: "center",
     }}>
-      <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563", textAlign: "center", margin: "8px 0 6px" }}>
+      <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563", textAlign: "center", margin: "8px 0 2px" }}>
           Вільний чат
         </div>
 
-        <label style={labelStyle}>Я</label>
-        <Chips options={MY_GENDER_OPTIONS} value={form.gender} onChange={setField("gender")} />
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Я</label>
+          <Chips options={MY_GENDER_OPTIONS} value={form.gender} onChange={setField("gender")} />
+          <label style={labelStyle}>Мій вік</label>
+          <Chips options={AGE_BANDS} value={form.age_band} onChange={setField("age_band")} />
+        </div>
 
-        <label style={labelStyle}>Мій вік</label>
-        <Chips options={AGE_BANDS} value={form.age_band} onChange={setField("age_band")} />
-
-        <label style={{ ...labelStyle, marginTop: 8 }}>Шукаю</label>
-        <Chips options={SEEK_GENDER_OPTIONS} value={form.seek_gender} onChange={setField("seek_gender")} />
-
-        <label style={labelStyle}>Вік співрозмовника</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <NeuField
-              type="number"
-              value={form.seek_age_min}
-              onChange={setSeekAge("seek_age_min")}
-              onBlur={clampSeekField("seek_age_min")}
-              onKey={onFormKey}
-              min={MIN_AGE}
-              max={MAX_AGE}
-              placeholder="від"
-            />
-          </div>
-          <span style={{ fontWeight: 800, color: "#9ca3af" }}>—</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <NeuField
-              type="number"
-              value={form.seek_age_max}
-              onChange={setSeekAge("seek_age_max")}
-              onBlur={clampSeekField("seek_age_max")}
-              onKey={onFormKey}
-              min={MIN_AGE}
-              max={MAX_AGE}
-              placeholder="до"
-            />
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Шукаю</label>
+          <Chips options={SEEK_GENDER_OPTIONS} value={form.seek_gender} onChange={setField("seek_gender")} />
+          <label style={labelStyle}>Вік співрозмовника</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <NeuField
+                type="number"
+                value={form.seek_age_min}
+                onChange={setSeekAge("seek_age_min")}
+                onBlur={clampSeekField("seek_age_min")}
+                onKey={onFormKey}
+                min={MIN_AGE}
+                max={MAX_AGE}
+                placeholder="від"
+              />
+            </div>
+            <span style={{ fontWeight: 800, color: "#9ca3af" }}>—</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <NeuField
+                type="number"
+                value={form.seek_age_max}
+                onChange={setSeekAge("seek_age_max")}
+                onBlur={clampSeekField("seek_age_max")}
+                onKey={onFormKey}
+                min={MIN_AGE}
+                max={MAX_AGE}
+                placeholder="до"
+              />
+            </div>
           </div>
         </div>
 
