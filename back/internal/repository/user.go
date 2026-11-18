@@ -16,6 +16,7 @@ import (
 var (
 	ErrNotFound      = errors.New("not found")
 	ErrUsernameTaken = errors.New("username taken")
+	ErrConflict      = errors.New("conflict")
 )
 
 type UserRepository struct {
