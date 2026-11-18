@@ -22,7 +22,7 @@ type RandomRepository struct {
 }
 
 type RandomRepo interface {
-	CreateGuest(ctx context.Context, prefs domain.RandomPrefs) (domain.RandomGuest, error)
+	CreateGuest(ctx context.Context, prefs domain.RandomPrefs, anonID string) (domain.RandomGuest, error)
 	GetGuest(ctx context.Context, id string) (domain.RandomGuest, error)
 	Enqueue(ctx context.Context, guest domain.RandomGuest) (*domain.RandomGuest, int64, error)
 	Dequeue(ctx context.Context, guestID string) error
@@ -52,20 +52,20 @@ func (r *RandomRepository) Close() {
 	r.db.Close()
 }
 
-const guestColumns = `g.id::text, g.gender, g.age_min, g.age_max, g.seek_gender, g.seek_age_min, g.seek_age_max, g.created_at`
+const guestColumns = `g.id::text, g.anon_id::text, g.gender, g.age_min, g.age_max, g.seek_gender, g.seek_age_min, g.seek_age_max, g.created_at`
 
 func scanGuest(row pgx.Row) (domain.RandomGuest, error) {
 	var g domain.RandomGuest
-	err := row.Scan(&g.ID, &g.Gender, &g.AgeMin, &g.AgeMax, &g.SeekGender, &g.SeekAgeMin, &g.SeekAgeMax, &g.CreatedAt)
+	err := row.Scan(&g.ID, &g.AnonID, &g.Gender, &g.AgeMin, &g.AgeMax, &g.SeekGender, &g.SeekAgeMin, &g.SeekAgeMax, &g.CreatedAt)
 	return g, err
 }
 
-func (r *RandomRepository) CreateGuest(ctx context.Context, p domain.RandomPrefs) (domain.RandomGuest, error) {
+func (r *RandomRepository) CreateGuest(ctx context.Context, p domain.RandomPrefs, anonID string) (domain.RandomGuest, error) {
 	return scanGuest(r.db.QueryRow(ctx, `
-		INSERT INTO random.guests AS g (gender, age_min, age_max, seek_gender, seek_age_min, seek_age_max)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO random.guests AS g (anon_id, gender, age_min, age_max, seek_gender, seek_age_min, seek_age_max)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		RETURNING `+guestColumns,
-		p.Gender, p.AgeMin, p.AgeMax, p.SeekGender, p.SeekAgeMin, p.SeekAgeMax))
+		anonID, p.Gender, p.AgeMin, p.AgeMax, p.SeekGender, p.SeekAgeMin, p.SeekAgeMax))
 }
 
 func (r *RandomRepository) GetGuest(ctx context.Context, id string) (domain.RandomGuest, error) {

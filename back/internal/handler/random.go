@@ -45,18 +45,24 @@ func (h *RandomHandler) notifyPeerLeft(sess domain.RandomSession) {
 	h.notify(sess.PeerID, map[string]any{"type": "peer_left", "session_id": sess.ID})
 }
 
+type randomStartRequest struct {
+	domain.RandomPrefs
+	AnonID string `json:"anon_id"`
+}
+
 type randomStartResponse struct {
-	Token string             `json:"token"`
-	Prefs domain.RandomPrefs `json:"prefs"`
+	Token  string             `json:"token"`
+	AnonID string             `json:"anon_id"`
+	Prefs  domain.RandomPrefs `json:"prefs"`
 }
 
 func (h *RandomHandler) Start(w http.ResponseWriter, r *http.Request) {
-	var req domain.RandomPrefs
+	var req randomStartRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 
-	guest, err := h.svc.Start(r.Context(), req)
+	guest, err := h.svc.Start(r.Context(), req.RandomPrefs, req.AnonID)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidPrefs) {
 			writeError(w, http.StatusBadRequest, "invalid prefs")
@@ -71,7 +77,11 @@ func (h *RandomHandler) Start(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, randomStartResponse{Token: token, Prefs: guest.RandomPrefs})
+	writeJSON(w, http.StatusCreated, randomStartResponse{
+		Token:  token,
+		AnonID: guest.AnonID,
+		Prefs:  guest.RandomPrefs,
+	})
 }
 
 type randomSearchResponse struct {

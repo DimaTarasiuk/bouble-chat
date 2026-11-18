@@ -2,12 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
 )
+
+var anonIDRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 var (
 	ErrInvalidPrefs    = errors.New("invalid prefs")
@@ -56,11 +62,34 @@ func sessionFromPeer(sessionID int64, peer domain.RandomGuest, at time.Time) dom
 	}
 }
 
-func (s *RandomService) Start(ctx context.Context, prefs domain.RandomPrefs) (domain.RandomGuest, error) {
+func normalizeAnonID(raw string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return newAnonID(), nil
+	}
+	if !anonIDRe.MatchString(id) {
+		return "", ErrInvalidPrefs
+	}
+	return strings.ToLower(id), nil
+}
+
+func newAnonID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+func (s *RandomService) Start(ctx context.Context, prefs domain.RandomPrefs, anonID string) (domain.RandomGuest, error) {
 	if err := validatePrefs(prefs); err != nil {
 		return domain.RandomGuest{}, err
 	}
-	return s.repo.CreateGuest(ctx, prefs)
+	id, err := normalizeAnonID(anonID)
+	if err != nil {
+		return domain.RandomGuest{}, err
+	}
+	return s.repo.CreateGuest(ctx, prefs, id)
 }
 
 type MatchResult struct {

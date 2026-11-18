@@ -20,7 +20,30 @@ import { AppStyles, Avatar, BooblifyLogo, Bubble, NeuField } from "./ui.jsx";
 
 const RANDOM_TOKEN_KEY = "random_token";
 const RANDOM_PREFS_KEY = "random_prefs";
+const RANDOM_ANON_KEY = "random_anon_id";
 const RECONNECT_MS = 1500;
+
+function getAnonId() {
+  try {
+    let id = localStorage.getItem(RANDOM_ANON_KEY);
+    if (!id && typeof crypto !== "undefined" && crypto.randomUUID) {
+      id = crypto.randomUUID();
+      localStorage.setItem(RANDOM_ANON_KEY, id);
+    }
+    return id || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveAnonId(id) {
+  if (!id) return;
+  try {
+    localStorage.setItem(RANDOM_ANON_KEY, id);
+  } catch {
+    // ignore quota / private mode
+  }
+}
 const MIN_AGE = 18;
 const MAX_AGE = 99;
 
@@ -363,7 +386,10 @@ export default function RandomPage({ onOpenAccount }) {
     }
     setStarting(true);
     setError("");
-    const res = await api("POST", "/api/random/start", null, prefs);
+    const res = await api("POST", "/api/random/start", null, {
+      ...prefs,
+      anon_id: getAnonId(),
+    });
     setStarting(false);
     if (!res.ok) {
       const messages = {
@@ -373,6 +399,7 @@ export default function RandomPage({ onOpenAccount }) {
       setError(messages[res.data.error] || "Не вдалося почати, спробуйте ще раз");
       return;
     }
+    saveAnonId(res.data.anon_id);
     sessionStorage.setItem(RANDOM_TOKEN_KEY, res.data.token);
     sessionStorage.setItem(RANDOM_PREFS_KEY, JSON.stringify(res.data.prefs));
     setPhase("searching");

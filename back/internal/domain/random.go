@@ -58,7 +58,8 @@ type RandomPrefs struct {
 }
 
 type RandomGuest struct {
-	ID string `json:"-"`
+	ID     string `json:"-"`
+	AnonID string `json:"anon_id"`
 	RandomPrefs
 	CreatedAt time.Time `json:"created_at"`
 }

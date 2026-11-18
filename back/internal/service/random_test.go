@@ -51,3 +51,18 @@ func TestFormatAgeBand(t *testing.T) {
 		t.Fatalf("FormatAgeBand(18, 22) = %q", got)
 	}
 }
+
+func TestNormalizeAnonID(t *testing.T) {
+	id, err := normalizeAnonID("")
+	if err != nil || id == "" {
+		t.Fatalf("empty should generate id, got %q err=%v", id, err)
+	}
+	fixed := "550e8400-e29b-41d4-a716-446655440000"
+	got, err := normalizeAnonID(fixed)
+	if err != nil || got != fixed {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	if _, err := normalizeAnonID("not-a-uuid"); err == nil {
+		t.Fatal("expected invalid prefs for bad uuid")
+	}
+}
