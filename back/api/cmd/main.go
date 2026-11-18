@@ -90,7 +90,7 @@ func main() {
 
 	authH := handler.NewAuth(authSvc, secret, hub)
 	chatH := handler.NewConversation(chatSvc, hub)
-	adminH := handler.NewAdmin(adminSvc, hub)
+	adminH := handler.NewAdmin(adminSvc, randomSvc, hub)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -143,6 +143,8 @@ func main() {
 			r.Get("/feedback", adminH.ListFeedback)
 			r.Get("/feedback/unread", adminH.UnreadFeedback)
 			r.Post("/feedback/read", adminH.MarkFeedbackRead)
+			r.Get("/random/sessions", adminH.RandomSessions)
+			r.Get("/random/sessions/{id}", adminH.RandomSession)
 		})
 	})
 

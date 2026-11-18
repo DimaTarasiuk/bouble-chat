@@ -392,7 +392,11 @@ export default function RandomPage({ onOpenAccount }) {
         "invalid prefs": "Перевірте введені дані",
         "too many requests": "Забагато спроб, спробуйте пізніше",
       };
-      setError(messages[res.data.error] || "Не вдалося почати, спробуйте ще раз");
+      setError(
+        res.status === 0
+          ? "Немає звʼязку з сервером (перевір, що бекенд запущений)"
+          : (messages[res.data.error] || "Не вдалося почати, спробуйте ще раз"),
+      );
       return;
     }
     saveAnonId(res.data.anon_id);

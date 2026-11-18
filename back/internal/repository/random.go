@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	"chat.com/internal/domain"
@@ -30,6 +31,8 @@ type RandomRepo interface {
 	CreateMessage(ctx context.Context, sessionID int64, fromGuest, text string, replyToID *int64) (domain.RandomMessage, error)
 	GetMessage(ctx context.Context, id int64) (domain.RandomMessage, int64, error)
 	ListMessages(ctx context.Context, sessionID int64, limit int) ([]domain.RandomMessage, error)
+	ListSessionsAdmin(ctx context.Context, status string, limit int, beforeID int64) ([]domain.RandomSessionAdmin, error)
+	GetSessionAdmin(ctx context.Context, id int64) (domain.RandomSessionAdmin, error)
 }
 
 func NewRandomRepository() *RandomRepository {
@@ -276,4 +279,82 @@ func (r *RandomRepository) ListMessages(ctx context.Context, sessionID int64, li
 	}
 	slices.Reverse(messages)
 	return messages, nil
+}
+
+const randomSessionAdminSelect = `
+	SELECT s.id, s.status, s.created_at, s.ended_at, s.last_message_at,
+		a.id::text, a.anon_id::text, a.gender, a.age_min, a.age_max,
+		b.id::text, b.anon_id::text, b.gender, b.age_min, b.age_max,
+		COALESCE((SELECT COUNT(*) FROM random.messages m WHERE m.session_id = s.id), 0),
+		COALESCE((
+			SELECT m.text FROM random.messages m
+			WHERE m.session_id = s.id
+			ORDER BY m.id DESC LIMIT 1
+		), '')
+	FROM random.sessions s
+	JOIN random.guests a ON a.id = s.guest_a
+	JOIN random.guests b ON b.id = s.guest_b`
+
+func scanSessionAdmin(scan interface {
+	Scan(dest ...any) error
+}) (domain.RandomSessionAdmin, error) {
+	var s domain.RandomSessionAdmin
+	var aMin, aMax, bMin, bMax int
+	err := scan.Scan(
+		&s.ID, &s.Status, &s.CreatedAt, &s.EndedAt, &s.LastMessageAt,
+		&s.GuestA.ID, &s.GuestA.AnonID, &s.GuestA.Gender, &aMin, &aMax,
+		&s.GuestB.ID, &s.GuestB.AnonID, &s.GuestB.Gender, &bMin, &bMax,
+		&s.MessageCount, &s.LastText,
+	)
+	if err != nil {
+		return domain.RandomSessionAdmin{}, err
+	}
+	s.GuestA.Age = domain.FormatAgeBand(aMin, aMax)
+	s.GuestB.Age = domain.FormatAgeBand(bMin, bMax)
+	return s, nil
+}
+
+func (r *RandomRepository) ListSessionsAdmin(ctx context.Context, status string, limit int, beforeID int64) ([]domain.RandomSessionAdmin, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	args := []any{}
+	where := `WHERE 1=1`
+	if status == domain.RandomSessionActive || status == domain.RandomSessionEnded {
+		args = append(args, status)
+		where += ` AND s.status = $` + strconv.Itoa(len(args))
+	}
+	if beforeID > 0 {
+		args = append(args, beforeID)
+		where += ` AND s.id < $` + strconv.Itoa(len(args))
+	}
+	args = append(args, limit)
+	rows, err := r.db.Query(ctx, randomSessionAdminSelect+`
+		`+where+`
+		ORDER BY COALESCE(s.last_message_at, s.created_at) DESC, s.id DESC
+		LIMIT $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]domain.RandomSessionAdmin, 0, limit)
+	for rows.Next() {
+		s, err := scanSessionAdmin(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *RandomRepository) GetSessionAdmin(ctx context.Context, id int64) (domain.RandomSessionAdmin, error) {
+	s, err := scanSessionAdmin(r.db.QueryRow(ctx, randomSessionAdminSelect+`
+		WHERE s.id = $1
+	`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.RandomSessionAdmin{}, ErrNotFound
+	}
+	return s, err
 }

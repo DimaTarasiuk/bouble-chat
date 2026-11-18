@@ -85,5 +85,24 @@ type RandomMessage struct {
 	Text       string        `json:"text"`
 	CreatedAt  time.Time     `json:"time"`
 	ReplyTo    *ReplyPreview `json:"reply_to,omitempty"`
-	FromGuest  string        `json:"-"`
+	FromGuest  string        `json:"from_guest,omitempty"`
+}
+
+type RandomGuestBrief struct {
+	ID     string `json:"id"`
+	AnonID string `json:"anon_id"`
+	Gender string `json:"gender"`
+	Age    string `json:"age"`
+}
+
+type RandomSessionAdmin struct {
+	ID             int64            `json:"id"`
+	Status         string           `json:"status"`
+	CreatedAt      time.Time        `json:"created_at"`
+	EndedAt        *time.Time       `json:"ended_at,omitempty"`
+	LastMessageAt  *time.Time       `json:"last_message_at,omitempty"`
+	MessageCount   int              `json:"message_count"`
+	LastText       string           `json:"last_text,omitempty"`
+	GuestA         RandomGuestBrief `json:"guest_a"`
+	GuestB         RandomGuestBrief `json:"guest_b"`
 }

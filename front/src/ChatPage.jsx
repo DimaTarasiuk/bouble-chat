@@ -37,6 +37,7 @@ import UserCard from "./admin/UserCard.jsx";
 import StatsPanel from "./admin/StatsPanel.jsx";
 import AnnouncementsPanel from "./admin/AnnouncementsPanel.jsx";
 import FeedbackPanel from "./admin/FeedbackPanel.jsx";
+import RandomMonitor from "./admin/RandomMonitor.jsx";
 import FeedbackForm from "./FeedbackForm.jsx";
 import AnnouncementPopup from "./AnnouncementPopup.jsx";
 
@@ -637,7 +638,7 @@ function AuthScreen({ onAuth, notice = "", onOpenRandom }) {
 function ConversationsScreen({
   onOpen, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged,
   feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen, activeChatId = null,
-  statsInMain = false, listMode = "chats", onListModeChange,
+  statsInMain = false, randomInMain = false, listMode = "chats", onListModeChange,
 }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
@@ -700,6 +701,7 @@ function ConversationsScreen({
             { id: "chats", label: "Чати" },
             { id: "users", label: "Юзери" },
             { id: "stats", label: "Статистика" },
+            { id: "random", label: "Інкогніто" },
             { id: "news", label: "Оголошення" },
           ].map((tab) => {
             const active = listMode === tab.id;
@@ -772,6 +774,14 @@ function ConversationsScreen({
             </div>
           ) : (
             <StatsPanel />
+          )
+        ) : listMode === "random" ? (
+          randomInMain ? (
+            <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24, padding: "0 12px" }}>
+              Інкогніто відкрито праворуч →
+            </div>
+          ) : (
+            <RandomMonitor />
           )
         ) : listMode === "news" ? (
           <AnnouncementsPanel />
@@ -1607,10 +1617,11 @@ export default function ChatPage({ onOpenRandom }) {
   const isHead = isHeadRole(role);
   const headerInitials = (username || "?").slice(0, 2).toUpperCase();
   const statsInMain = isDesktop && isHead && sidebarMode === "stats";
+  const randomInMain = isDesktop && isHead && sidebarMode === "random";
 
   const changeSidebarMode = (mode) => {
     setSidebarMode(mode);
-    if (mode === "stats" && isDesktop && activeChat) closeChat();
+    if ((mode === "stats" || mode === "random") && isDesktop && activeChat) closeChat();
   };
 
   const openUserFromAdmin = async (peer) => {
@@ -1799,6 +1810,7 @@ export default function ChatPage({ onOpenRandom }) {
       onFeedbackSeen={markFeedbackRead}
       activeChatId={activeChat?.id ?? null}
       statsInMain={statsInMain}
+      randomInMain={randomInMain}
       listMode={isHead ? sidebarMode : "chats"}
       onListModeChange={changeSidebarMode}
     />
@@ -2071,7 +2083,9 @@ export default function ChatPage({ onOpenRandom }) {
             }}>
               {activeChat
                 ? <>{chatHeader}{chatBody}</>
-                : statsInMain ? <StatsPanel wide /> : emptyPane}
+                : statsInMain ? <StatsPanel wide />
+                : randomInMain ? <RandomMonitor wide />
+                : emptyPane}
             </section>
           </div>
         ) : (

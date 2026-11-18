@@ -15,12 +15,13 @@ import (
 )
 
 type AdminHandler struct {
-	svc *service.AdminService
-	hub *ws.Hub
+	svc    *service.AdminService
+	random *service.RandomService
+	hub    *ws.Hub
 }
 
-func NewAdmin(svc *service.AdminService, hub *ws.Hub) *AdminHandler {
-	return &AdminHandler{svc: svc, hub: hub}
+func NewAdmin(svc *service.AdminService, random *service.RandomService, hub *ws.Hub) *AdminHandler {
+	return &AdminHandler{svc: svc, random: random, hub: hub}
 }
 
 func (h *AdminHandler) isOnline(userID int64) bool {
@@ -262,4 +263,54 @@ func (h *AdminHandler) notifyFeedback(ctx context.Context, f domain.Feedback) {
 	for _, id := range readers {
 		h.hub.NotifyUser(id, payload)
 	}
+}
+
+func (h *AdminHandler) RandomSessions(w http.ResponseWriter, r *http.Request) {
+	if h.random == nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "all"
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	beforeID, _ := strconv.ParseInt(r.URL.Query().Get("before_id"), 10, 64)
+	list, err := h.random.ListSessionsAdmin(r.Context(), status, limit, beforeID)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidPrefs) {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+type randomSessionDetailResponse struct {
+	Session  domain.RandomSessionAdmin `json:"session"`
+	Messages []domain.RandomMessage    `json:"messages"`
+}
+
+func (h *AdminHandler) RandomSession(w http.ResponseWriter, r *http.Request) {
+	if h.random == nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	sess, messages, err := h.random.GetSessionAdmin(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, randomSessionDetailResponse{Session: sess, Messages: messages})
 }

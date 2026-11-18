@@ -183,3 +183,25 @@ func (s *RandomService) Send(ctx context.Context, guestID, text string, replyToI
 func (s *RandomService) PruneQueue(ctx context.Context, connected []string, queuedBefore time.Time) error {
 	return s.repo.PruneQueue(ctx, connected, queuedBefore)
 }
+
+func (s *RandomService) ListSessionsAdmin(ctx context.Context, status string, limit int, beforeID int64) ([]domain.RandomSessionAdmin, error) {
+	if status != "" && status != "all" && status != domain.RandomSessionActive && status != domain.RandomSessionEnded {
+		return nil, ErrInvalidPrefs
+	}
+	if status == "all" {
+		status = ""
+	}
+	return s.repo.ListSessionsAdmin(ctx, status, limit, beforeID)
+}
+
+func (s *RandomService) GetSessionAdmin(ctx context.Context, id int64) (domain.RandomSessionAdmin, []domain.RandomMessage, error) {
+	sess, err := s.repo.GetSessionAdmin(ctx, id)
+	if err != nil {
+		return domain.RandomSessionAdmin{}, nil, err
+	}
+	messages, err := s.repo.ListMessages(ctx, id, randomHistoryLimit)
+	if err != nil {
+		return domain.RandomSessionAdmin{}, nil, err
+	}
+	return sess, messages, nil
+}
