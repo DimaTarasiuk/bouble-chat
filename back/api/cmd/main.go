@@ -281,7 +281,7 @@ func recordOnlineSnapshots(ctx context.Context, svc *service.AdminService, hub *
 	}
 }
 
-const randomReconnectGrace = 15 * time.Second
+const randomReconnectGrace = 90 * time.Second
 
 func pruneRandomQueue(ctx context.Context, svc *service.RandomService, hub *ws.RandomHub) {
 	ticker := time.NewTicker(5 * time.Minute)
