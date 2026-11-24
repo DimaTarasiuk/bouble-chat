@@ -60,3 +60,10 @@ type UserCard struct {
 	ChatsCount    int  `json:"chats_count"`
 	MessagesCount int  `json:"messages_count"`
 }
+
+// AppVersion is the latest Android APK clients should offer to install.
+type AppVersion struct {
+	Build   int    `json:"build"`
+	Version string `json:"version"`
+	ApkURL  string `json:"apk_url"`
+}

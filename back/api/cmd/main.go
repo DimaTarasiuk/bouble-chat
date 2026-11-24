@@ -70,6 +70,7 @@ func main() {
 		_ = authSvc.TouchLastSeen(ctx, userID)
 	}
 	hub := ws.NewHub(originChecker(allowedOrigins), touchLastSeen, touchLastSeen)
+	hub.SetAppUpdateProvider(adminSvc.AppUpdatePayload)
 	go hub.Run(ctx)
 	go recordOnlineSnapshots(ctx, adminSvc, hub)
 
@@ -97,6 +98,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+	r.Get("/api/app/version", adminH.GetAppVersion)
+	r.With(rateLimitByIP(10, time.Minute), adminH.AppVersionAuth(authH)).Post("/api/admin/app-version", adminH.SetAppVersion)
 	r.With(rateLimitByIP(10, time.Minute)).Post("/api/login", authH.Login)
 	r.With(rateLimitByIP(5, time.Hour)).Post("/api/register", authH.Register)
 	r.Get("/ws", authH.WSAuth(chatH.ServeWS))
@@ -147,6 +150,7 @@ func main() {
 			r.Delete("/random/sessions", adminH.DeleteEndedRandomSessions)
 			r.Get("/random/sessions/{id}", adminH.RandomSession)
 			r.Delete("/random/sessions/{id}", adminH.DeleteRandomSession)
+			r.Post("/app-version", adminH.SetAppVersion)
 		})
 	})
 

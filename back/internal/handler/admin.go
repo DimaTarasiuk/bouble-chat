@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"chat.com/internal/domain"
 	"chat.com/internal/repository"
@@ -350,4 +352,76 @@ func (h *AdminHandler) DeleteEndedRandomSessions(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "deleted": n})
+}
+
+func (h *AdminHandler) GetAppVersion(w http.ResponseWriter, r *http.Request) {
+	v := h.svc.AppVersion()
+	writeJSON(w, http.StatusOK, v)
+}
+
+type appVersionRequest struct {
+	Build   int    `json:"build"`
+	Version string `json:"version"`
+	ApkURL  string `json:"apk_url"`
+}
+
+func (h *AdminHandler) SetAppVersion(w http.ResponseWriter, r *http.Request) {
+	var req appVersionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	v, err := h.svc.SetAppVersion(r.Context(), req.Build, req.Version, req.ApkURL)
+	if err != nil {
+		if errors.Is(err, service.ErrAppVersionInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid app version")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if h.hub != nil {
+		if payload, err := json.Marshal(map[string]any{
+			"type":     "app_update",
+			"build":    v.Build,
+			"version":  v.Version,
+			"apk_url":  v.ApkURL,
+		}); err == nil {
+			h.hub.BroadcastPresence(payload)
+		}
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// AppVersionAuth allows CI APP_VERSION_TOKEN or a head JWT.
+func (h *AdminHandler) AppVersionAuth(auth *AuthHandler) func(http.Handler) http.Handler {
+	token := strings.TrimSpace(os.Getenv("APP_VERSION_TOKEN"))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			header := r.Header.Get("Authorization")
+			if !strings.HasPrefix(header, "Bearer ") {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			raw := strings.TrimPrefix(header, "Bearer ")
+			if token != "" && raw == token {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if auth == nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			authUser, status, msg := auth.authenticate(r.Context(), raw)
+			if status != 0 {
+				writeError(w, status, msg)
+				return
+			}
+			if authUser.Role != domain.RoleHead {
+				writeError(w, http.StatusForbidden, "forbidden")
+				return
+			}
+			ctx := context.WithValue(r.Context(), userKey, authUser)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

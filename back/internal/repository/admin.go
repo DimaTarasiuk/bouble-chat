@@ -35,6 +35,9 @@ type AdminRepo interface {
 	UnreadFeedbackCount(ctx context.Context, userID int64) (int, error)
 	MarkFeedbackRead(ctx context.Context, userID, lastID int64) error
 	HeadIDs(ctx context.Context) ([]int64, error)
+
+	GetAppVersion(ctx context.Context) (domain.AppVersion, error)
+	SetAppVersion(ctx context.Context, v domain.AppVersion) error
 }
 
 func NewAdminRepository() *AdminRepository {
@@ -400,4 +403,28 @@ func (r *AdminRepository) HeadIDs(ctx context.Context) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (r *AdminRepository) GetAppVersion(ctx context.Context) (domain.AppVersion, error) {
+	var v domain.AppVersion
+	err := r.db.QueryRow(ctx, `
+		SELECT build, version, apk_url FROM app_version WHERE id = 1
+	`).Scan(&v.Build, &v.Version, &v.ApkURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AppVersion{}, nil
+	}
+	return v, err
+}
+
+func (r *AdminRepository) SetAppVersion(ctx context.Context, v domain.AppVersion) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO app_version (id, build, version, apk_url, updated_at)
+		VALUES (1, $1, $2, $3, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			build = EXCLUDED.build,
+			version = EXCLUDED.version,
+			apk_url = EXCLUDED.apk_url,
+			updated_at = NOW()
+	`, v.Build, v.Version, v.ApkURL)
+	return err
 }

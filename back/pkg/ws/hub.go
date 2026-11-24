@@ -60,6 +60,7 @@ type Hub struct {
 	unregister  chan *Client
 	onOnline    func(userID int64)
 	onOffline   func(userID int64)
+	appUpdate   func() map[string]any
 }
 
 func NewHub(checkOrigin func(r *http.Request) bool, onOnline, onOffline func(userID int64)) *Hub {
@@ -81,6 +82,11 @@ func NewHub(checkOrigin func(r *http.Request) bool, onOnline, onOffline func(use
 		onOnline:    onOnline,
 		onOffline:   onOffline,
 	}
+}
+
+// SetAppUpdateProvider supplies the current app_update object for presence snapshots.
+func (h *Hub) SetAppUpdateProvider(fn func() map[string]any) {
+	h.appUpdate = fn
 }
 
 func TokenFromRequest(r *http.Request) string {
@@ -254,11 +260,17 @@ func (h *Hub) onlineList() onlineSnapshot {
 
 func (h *Hub) sendSnapshot(client *Client) {
 	list := h.onlineList().names
-	payload, err := json.Marshal(map[string]any{
+	msg := map[string]any{
 		"type":         "presence_snapshot",
 		"online":       list,
 		"online_count": len(list),
-	})
+	}
+	if h.appUpdate != nil {
+		if update := h.appUpdate(); update != nil {
+			msg["app_update"] = update
+		}
+	}
+	payload, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}

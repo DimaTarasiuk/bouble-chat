@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"chat.com/internal/domain"
@@ -14,6 +17,7 @@ var (
 	ErrCannotModerate      = errors.New("cannot moderate this user")
 	ErrAnnouncementInvalid = errors.New("invalid announcement")
 	ErrFeedbackInvalid     = errors.New("invalid feedback")
+	ErrAppVersionInvalid   = errors.New("invalid app version")
 )
 
 const (
@@ -24,10 +28,67 @@ const (
 type AdminService struct {
 	users repository.UserRepo
 	admin repository.AdminRepo
+
+	mu         sync.RWMutex
+	appVersion domain.AppVersion
 }
 
 func NewAdminService(users repository.UserRepo, admin repository.AdminRepo) *AdminService {
-	return &AdminService{users: users, admin: admin}
+	s := &AdminService{users: users, admin: admin}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if v, err := admin.GetAppVersion(ctx); err == nil {
+		s.appVersion = v
+	}
+	return s
+}
+
+func (s *AdminService) AppVersion() domain.AppVersion {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.appVersion
+}
+
+func (s *AdminService) AppUpdatePayload() map[string]any {
+	v := s.AppVersion()
+	if v.Build <= 0 || v.ApkURL == "" {
+		return nil
+	}
+	return map[string]any{
+		"build":   v.Build,
+		"version": v.Version,
+		"apk_url": v.ApkURL,
+	}
+}
+
+func (s *AdminService) GetAppVersion(ctx context.Context) (domain.AppVersion, error) {
+	v, err := s.admin.GetAppVersion(ctx)
+	if err != nil {
+		return domain.AppVersion{}, err
+	}
+	s.mu.Lock()
+	s.appVersion = v
+	s.mu.Unlock()
+	return v, nil
+}
+
+func (s *AdminService) SetAppVersion(ctx context.Context, build int, version, apkURL string) (domain.AppVersion, error) {
+	version = strings.TrimSpace(version)
+	apkURL = strings.TrimSpace(apkURL)
+	if build <= 0 || version == "" || apkURL == "" {
+		return domain.AppVersion{}, ErrAppVersionInvalid
+	}
+	if u, err := url.ParseRequestURI(apkURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return domain.AppVersion{}, ErrAppVersionInvalid
+	}
+	v := domain.AppVersion{Build: build, Version: version, ApkURL: apkURL}
+	if err := s.admin.SetAppVersion(ctx, v); err != nil {
+		return domain.AppVersion{}, err
+	}
+	s.mu.Lock()
+	s.appVersion = v
+	s.mu.Unlock()
+	return v, nil
 }
 
 func (s *AdminService) UserCard(ctx context.Context, username string) (domain.UserCard, error) {
@@ -150,3 +211,4 @@ func (s *AdminService) MarkFeedbackRead(ctx context.Context, userID, lastID int6
 func (s *AdminService) FeedbackReaders(ctx context.Context) ([]int64, error) {
 	return s.admin.HeadIDs(ctx)
 }
+
