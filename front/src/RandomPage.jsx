@@ -488,7 +488,7 @@ export default function RandomPage({ onOpenAccount }) {
         flexShrink: 0,
       }}
     >
-      {hasAccount ? "Мої чати →" : "Увійти →"}
+      {hasAccount ? "Мої чати →" : "Увійти"}
     </button>
   );
 

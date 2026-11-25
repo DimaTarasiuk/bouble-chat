@@ -195,16 +195,127 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		h.hub.BroadcastTo(convID, data)
 	}
 
-	if notify, err := json.Marshal(map[string]any{
-		"type":            "chat_message",
-		"conversation_id": convID,
-		"from":            message.From,
-		"id":              message.ID,
-	}); err == nil {
-		h.hub.NotifyUser(conv.PeerID, notify)
+	notice, noticeErr := h.svc.MessageNotice(r.Context(), conv.PeerID, convID)
+	if noticeErr == nil && notice != "none" {
+		payload := map[string]any{
+			"type":            "chat_message",
+			"conversation_id": convID,
+			"from":            message.From,
+			"id":              message.ID,
+		}
+		if notice == "hidden" {
+			payload = map[string]any{
+				"type":            "hidden_chat_message",
+				"conversation_id": convID,
+				"id":              message.ID,
+			}
+		}
+		if notify, err := json.Marshal(payload); err == nil {
+			h.hub.NotifyUser(conv.PeerID, notify)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, message)
+}
+
+type hideConversationRequest struct {
+	Code        string `json:"code"`
+	CodeConfirm string `json:"code_confirm"`
+}
+
+func (h *ConversationHandler) Hide(w http.ResponseWriter, r *http.Request) {
+	user, convID, ok := h.memberConversation(w, r)
+	if !ok {
+		return
+	}
+	var req hideConversationRequest
+	if !decodeOptionalJSON(w, r, &req) {
+		return
+	}
+	err := h.svc.Hide(r.Context(), user.ID, convID, req.Code, req.CodeConfirm)
+	if err != nil {
+		writeConversationErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *ConversationHandler) Unhide(w http.ResponseWriter, r *http.Request) {
+	user, convID, ok := h.memberConversation(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.Unhide(r.Context(), user.ID, convID); err != nil {
+		writeConversationErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *ConversationHandler) Dismiss(w http.ResponseWriter, r *http.Request) {
+	user, convID, ok := h.memberConversation(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.Dismiss(r.Context(), user.ID, convID); err != nil {
+		writeConversationErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type unlockHiddenRequest struct {
+	Code string `json:"code"`
+}
+
+func (h *ConversationHandler) Unlock(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req unlockHiddenRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := h.svc.Unlock(r.Context(), user.ID, req.Code)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    result.OK,
+		"chats": result.Chats,
+	})
+}
+
+func (h *ConversationHandler) memberConversation(w http.ResponseWriter, r *http.Request) (AuthUser, int64, bool) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return AuthUser{}, 0, false
+	}
+	convID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return AuthUser{}, 0, false
+	}
+	return user, convID, true
+}
+
+func writeConversationErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrCodeRequired):
+		writeError(w, http.StatusConflict, "code_required")
+	case errors.Is(err, service.ErrInvalidCode):
+		writeError(w, http.StatusBadRequest, "invalid code")
+	case errors.Is(err, service.ErrCodeMismatch):
+		writeError(w, http.StatusBadRequest, "code mismatch")
+	case errors.Is(err, service.ErrForbidden):
+		writeError(w, http.StatusForbidden, "forbidden")
+	default:
+		writeError(w, http.StatusInternalServerError, "internal server error")
+	}
 }
 
 func (h *ConversationHandler) EditMessage(w http.ResponseWriter, r *http.Request) {

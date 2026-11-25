@@ -17,7 +17,7 @@ type MessageRepository struct {
 }
 
 type MessageRepo interface {
-	ListPage(ctx context.Context, conversationID int64, beforeID *int64, limit int) ([]domain.Message, error)
+	ListPage(ctx context.Context, conversationID int64, beforeID *int64, afterID int64, limit int) ([]domain.Message, error)
 	GetByID(ctx context.Context, id int64) (domain.Message, int64, error)
 	Create(ctx context.Context, conversationID, userID int64, username, text string, replyToID *int64) (domain.Message, error)
 	UpdateText(ctx context.Context, id int64, text string) (domain.Message, error)
@@ -75,16 +75,17 @@ func scanMessage(row pgx.Row, extra ...any) (domain.Message, error) {
 	return m, nil
 }
 
-func (r *MessageRepository) ListPage(ctx context.Context, conversationID int64, beforeID *int64, limit int) ([]domain.Message, error) {
+func (r *MessageRepository) ListPage(ctx context.Context, conversationID int64, beforeID *int64, afterID int64, limit int) ([]domain.Message, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT `+messageColumns+`
 		FROM messages m
 		`+messageJoins+`
 		WHERE m.conversation_id = $1
 		  AND ($2::bigint IS NULL OR m.id < $2)
+		  AND m.id > $4
 		ORDER BY m.id DESC
 		LIMIT $3
-	`, conversationID, beforeID, limit)
+	`, conversationID, beforeID, limit, afterID)
 	if err != nil {
 		return nil, err
 	}
