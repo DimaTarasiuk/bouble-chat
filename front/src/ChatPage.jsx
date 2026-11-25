@@ -21,6 +21,7 @@ import {
   SHADOW_D,
   SHADOW_L,
   neu,
+  haptic,
   MIN_PASSWORD_LEN,
   MAX_MESSAGE_LEN,
   MESSAGES_PAGE_SIZE,
@@ -594,7 +595,7 @@ function AuthScreen({ onAuth, notice = "", onOpenRandom }) {
         >
           {loading
             ? (isRegister ? "Реєстрація..." : "Вхід...")
-            : (isRegister ? "Зареєструватися →" : "Увійти →")}
+            : (isRegister ? "Зареєструватися →" : "Увійти")}
         </button>
 
         <button
@@ -627,10 +628,258 @@ function AuthScreen({ onAuth, notice = "", onOpenRandom }) {
               color: "#6b8fb5",
             }}
           >
-            ← Інкогніто
+            Інкогніто
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+const HIDE_HOLD_MS = 7000;
+const SWIPE_WIDTH = 168;
+
+function overlayStyle() {
+  return {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    background: "rgba(75, 85, 99, 0.25)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  };
+}
+
+function dialogCardStyle() {
+  return {
+    width: "100%",
+    maxWidth: 340,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    padding: "24px 22px",
+    borderRadius: 24,
+    background: NEU_BG,
+    boxShadow: `9px 9px 18px ${SHADOW_D}, -9px -9px 18px ${SHADOW_L}`,
+    fontFamily: "'Nunito', sans-serif",
+  };
+}
+
+function pillButton(color, off) {
+  return {
+    flex: 1,
+    padding: "12px 0",
+    border: "none",
+    borderRadius: 50,
+    background: NEU_BG,
+    boxShadow: neu(false, 4, 8),
+    cursor: off ? "default" : "pointer",
+    opacity: off ? 0.6 : 1,
+    fontFamily: "'Nunito', sans-serif",
+    fontSize: 14,
+    fontWeight: 800,
+    color,
+  };
+}
+
+function ConfirmDialog({ title, onNo, onYes }) {
+  return (
+    <div onClick={onNo} style={overlayStyle()}>
+      <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={dialogCardStyle()}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563", textAlign: "center" }}>{title}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" className="neu-press" onClick={onNo} style={pillButton("#9ca3af")}>Ні</button>
+          <button type="button" className="neu-press" onClick={onYes} style={pillButton("#c084a0")}>Так</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodeDialog({ code, again, error, onCode, onAgain, onCancel, onSave }) {
+  const ready = /^\d{4,8}$/.test(code) && code === again;
+  return (
+    <div onClick={onCancel} style={overlayStyle()}>
+      <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={dialogCardStyle()}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#4b5563", textAlign: "center" }}>Код скритих чатів</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#c084a0", textAlign: "center", lineHeight: 1.45 }}>
+          Запам’ятайте цей код, його неможливо відновити
+        </div>
+        <NeuField type="password" value={code} onChange={(e) => onCode(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="Код, 4–8 цифр" autoFocus />
+        <NeuField type="password" value={again} onChange={(e) => onAgain(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="Повторіть код" />
+        {error && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#c084a0", textAlign: "center" }}>{error}</div>
+        )}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" className="neu-press" onClick={onCancel} style={pillButton("#9ca3af")}>Ні</button>
+          <button type="button" className="neu-press" disabled={!ready} onClick={ready ? onSave : undefined} style={pillButton("#6b8fb5", !ready)}>Так</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatRow({ chat, online, active, onOpen, onHide, vault, onUnhide, onDismiss }) {
+  const [shift, setShift] = useState(0);
+  const origin = useRef(null);
+  const shiftRef = useRef(0);
+  const holdTimer = useRef(null);
+  const moved = useRef(false);
+  const suppressClick = useRef(false);
+  const isOnline = online.has(chat.peer);
+  const onCol = onlineColor(chat.peer_gender);
+  const unread = Number(chat.unread_count) || 0;
+
+  const clearHold = () => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  };
+
+  const onPointerDown = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    origin.current = { x: e.clientX, y: e.clientY, shift: shiftRef.current, id: e.pointerId };
+    moved.current = false;
+    clearHold();
+    if (!vault && onHide) {
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null;
+        suppressClick.current = true;
+        haptic(18);
+        onHide(chat);
+      }, HIDE_HOLD_MS);
+    }
+  };
+
+  const onPointerMove = (e) => {
+    const start = origin.current;
+    if (!start || start.id !== e.pointerId) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) > 16 || Math.abs(dy) > 16) {
+      clearHold();
+      moved.current = true;
+    }
+    if (!vault) return;
+    if (dx < 0 || start.shift < 0) {
+      const next = Math.max(-SWIPE_WIDTH, Math.min(0, start.shift + dx));
+      shiftRef.current = next;
+      setShift(next);
+    }
+  };
+
+  const onPointerUp = () => {
+    clearHold();
+    if (vault) {
+      const next = shiftRef.current < -48 ? -SWIPE_WIDTH : 0;
+      shiftRef.current = next;
+      setShift(next);
+      if (moved.current) suppressClick.current = true;
+    }
+    origin.current = null;
+  };
+
+  const onClick = () => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    if (shiftRef.current !== 0) {
+      shiftRef.current = 0;
+      setShift(0);
+      return;
+    }
+    onOpen(chat);
+  };
+
+  return (
+    <div style={{ position: "relative", marginBottom: 10 }}>
+      {vault && (
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: 18,
+          overflow: "hidden",
+          display: "flex",
+          justifyContent: "flex-end",
+        }}>
+          <button
+            type="button"
+            onClick={() => onUnhide(chat)}
+            style={{
+              width: SWIPE_WIDTH / 2,
+              border: "none",
+              background: "#6b8fb5",
+              color: "#fff",
+              fontFamily: "'Nunito', sans-serif",
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >Повернути</button>
+          <button
+            type="button"
+            onClick={() => onDismiss(chat)}
+            style={{
+              width: SWIPE_WIDTH / 2,
+              border: "none",
+              background: "#c084a0",
+              color: "#fff",
+              fontFamily: "'Nunito', sans-serif",
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >Видалити</button>
+        </div>
+      )}
+      <button
+        type="button"
+        className="neu-press"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClick={onClick}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 12px",
+          border: "none",
+          borderRadius: 18,
+          background: NEU_BG,
+          boxShadow: active ? neu(true, 3, 6) : neu(false, 3, 6),
+          cursor: "pointer",
+          fontFamily: "'Nunito', sans-serif",
+          textAlign: "left",
+          transform: `translateX(${shift}px)`,
+          position: "relative",
+          touchAction: vault ? "pan-y" : "manipulation",
+        }}
+      >
+        <div style={{ position: "relative" }}>
+          <Avatar initials={chat.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
+          <div style={{
+            position: "absolute", bottom: 0, right: 0,
+            width: 9, height: 9, borderRadius: "50%",
+            background: isOnline ? onCol : ONLINE_OFF,
+            boxShadow: ONLINE_DOT_SHADOW,
+          }}/>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{chat.peer}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
+            {isOnline ? "● Online" : "Offline"}
+          </div>
+        </div>
+        {unread > 0 && <UnreadBadge count={unread} />}
+      </button>
     </div>
   );
 }
@@ -639,6 +888,7 @@ function ConversationsScreen({
   onOpen, onlineUsers, chats, isHead, adminUsers, onOpenUser, onAdminUsersChanged,
   feedbackUnread = 0, feedbackTick = 0, onFeedbackSeen, activeChatId = null,
   statsInMain = false, randomInMain = false, listMode = "chats", onListModeChange,
+  vault = false, onUnlock, onLock, onHide, onUnhide, onDismiss,
 }) {
   const online = onlineUsers ?? new Set();
   const [query, setQuery] = useState("");
@@ -678,7 +928,14 @@ function ConversationsScreen({
           : "Не вдалося відкрити чат");
         return;
       }
-      onOpen({ id: data.id, peer: data.peer, peer_gender: data.peer_gender || "", unread_count: data.unread_count || 0 });
+      onOpen({
+        id: data.id,
+        peer: data.peer,
+        peer_gender: data.peer_gender || "",
+        unread_count: data.unread_count || 0,
+        hidden: !!data.hidden,
+        dismissed: !!data.dismissed,
+      });
     } catch {
       setError("Не вдалося відкрити чат");
     }
@@ -752,10 +1009,45 @@ function ConversationsScreen({
 
       {(listMode === "chats" || listMode === "users") && (
         <div style={{ padding: "16px 20px 8px" }}>
+          {vault && listMode === "chats" && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#6b8fb5" }}>Скриті чати</span>
+              <button
+                type="button"
+                className="neu-press"
+                onClick={onLock}
+                style={{
+                  border: "none",
+                  background: NEU_BG,
+                  boxShadow: neu(false, 3, 6),
+                  borderRadius: 50,
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  fontFamily: "'Nunito', sans-serif",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#9ca3af",
+                }}
+              >Заблокувати</button>
+            </div>
+          )}
           <NeuField
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder={listMode === "users" ? "Фільтр юзерів..." : "Пошук за логіном..."}
+            onKey={(e) => {
+              if (e.key !== "Enter" || listMode !== "chats") return;
+              const q = query.trim();
+              if (!/^\d{4,8}$/.test(q) || !onUnlock) return;
+              e.preventDefault();
+              onUnlock(q).then((opened) => {
+                if (opened) {
+                  setQuery("");
+                  setResults([]);
+                  setError("");
+                }
+              });
+            }}
           />
         </div>
       )}
@@ -891,53 +1183,21 @@ function ConversationsScreen({
           })
         ) : chats.length === 0 ? (
           <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#9ca3af", marginTop: 24, padding: "0 12px" }}>
-            Немає діалогів. Знайдіть користувача за логіном
+            {vault ? "Немає скритих чатів" : "Немає діалогів. Знайдіть користувача за логіном"}
           </div>
-        ) : chats.map(c => {
-          const isOnline = online.has(c.peer);
-          const onCol = onlineColor(c.peer_gender);
-          const unread = Number(c.unread_count) || 0;
-          const isActive = c.id === activeChatId;
-          return (
-          <button
+        ) : chats.map(c => (
+          <ChatRow
             key={c.id}
-            className="neu-press"
-            onClick={() => onOpen({ id: c.id, peer: c.peer, peer_gender: c.peer_gender || "" })}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 12px",
-              marginBottom: 10,
-              border: "none",
-              borderRadius: 18,
-              background: NEU_BG,
-              boxShadow: isActive ? neu(true, 3, 6) : neu(false, 3, 6),
-              cursor: "pointer",
-              fontFamily: "'Nunito', sans-serif",
-              textAlign: "left",
-            }}
-          >
-            <div style={{ position: "relative" }}>
-              <Avatar initials={c.peer.slice(0, 2).toUpperCase()} color={NAME_ABBR} />
-              <div style={{
-                position: "absolute", bottom: 0, right: 0,
-                width: 9, height: 9, borderRadius: "50%",
-                background: isOnline ? onCol : ONLINE_OFF,
-                boxShadow: ONLINE_DOT_SHADOW,
-              }}/>
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#4b5563" }}>{c.peer}</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: isOnline ? onCol : ONLINE_OFF_TEXT }}>
-                {isOnline ? "● Online" : "Offline"}
-              </div>
-            </div>
-            {unread > 0 && <UnreadBadge count={unread} />}
-          </button>
-          );
-        })}
+            chat={c}
+            online={online}
+            active={c.id === activeChatId}
+            vault={vault}
+            onOpen={onOpen}
+            onHide={onHide}
+            onUnhide={onUnhide}
+            onDismiss={onDismiss}
+          />
+        ))}
       </div>
 
       <div style={{ textAlign: "center", padding: "2px 0 10px" }}>
@@ -996,6 +1256,14 @@ export default function ChatPage({ onOpenRandom }) {
   const [onlineCount, setOnlineCount] = useState(0);
   const [myGender, setMyGender] = useState("");
   const [chats, setChats] = useState([]);
+  const [hiddenMode, setHiddenMode] = useState(false);
+  const [hiddenChats, setHiddenChats] = useState([]);
+  const [hideTarget, setHideTarget] = useState(null);
+  const [hideStep, setHideStep] = useState("ask");
+  const [hideError, setHideError] = useState("");
+  const [codeDraft, setCodeDraft] = useState("");
+  const [codeAgain, setCodeAgain] = useState("");
+  const [dismissTarget, setDismissTarget] = useState(null);
   const [adminUsers, setAdminUsers] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [announcements, setAnnouncements] = useState([]);
@@ -1015,6 +1283,8 @@ export default function ChatPage({ onOpenRandom }) {
   const emojiWrapRef = useRef(null);
   const skipSmooth = useRef(true);
   const activeChatRef = useRef(null);
+  const hiddenModeRef = useRef(false);
+  const hiddenIdsRef = useRef(new Set());
   const [historyIds, setHistoryIds] = useState(() => new Set());
   const [hasMore, setHasMore] = useState(false);
   const loadingOlderRef = useRef(false);
@@ -1025,6 +1295,8 @@ export default function ChatPage({ onOpenRandom }) {
     if (!session) {
       setUsername(null);
       setRole("user");
+      setHiddenMode(false);
+      setHiddenChats([]);
       setChats([]);
       setAdminUsers([]);
       setSidebarMode("chats");
@@ -1112,6 +1384,7 @@ export default function ChatPage({ onOpenRandom }) {
   const markChatRead = (convId) => {
     if (!convId) return;
     setChats(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+    setHiddenChats(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
     fetch(`${API_URL}/api/conversations/${convId}/read`, {
       method: "POST",
       headers: authHeaders(),
@@ -1121,6 +1394,11 @@ export default function ChatPage({ onOpenRandom }) {
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
+
+  useEffect(() => {
+    hiddenModeRef.current = hiddenMode;
+    hiddenIdsRef.current = new Set(hiddenChats.map(c => c.id));
+  }, [hiddenMode, hiddenChats]);
 
   useEffect(() => {
     notificationSound.current = createNotificationSound();
@@ -1238,6 +1516,23 @@ export default function ChatPage({ onOpenRandom }) {
                 last_seen: data.online ? u.last_seen : (data.last_seen || new Date().toISOString()),
               };
             });
+          });
+          return;
+        }
+        if (data.type === "hidden_chat_message" && data.conversation_id) {
+          if (!hiddenModeRef.current) return;
+          const openId = activeChatRef.current?.id;
+          if (openId === data.conversation_id) {
+            markChatRead(data.conversation_id);
+            return;
+          }
+          setHiddenChats(prev => {
+            const idx = prev.findIndex(c => c.id === data.conversation_id);
+            if (idx === -1) return prev;
+            const updated = [...prev];
+            const cur = updated[idx];
+            updated[idx] = { ...cur, unread_count: (Number(cur.unread_count) || 0) + 1 };
+            return updated;
           });
           return;
         }
@@ -1523,6 +1818,17 @@ export default function ChatPage({ onOpenRandom }) {
         return;
       }
       setMessages(prev => prev.map(m => m.id === tempId ? savedMsg : m));
+      if (activeChat && !hiddenIdsRef.current.has(activeChat.id)) {
+        setChats(prev => {
+          if (prev.some(c => c.id === activeChat.id)) return prev;
+          return [{
+            id: activeChat.id,
+            peer: activeChat.peer,
+            peer_gender: activeChat.peer_gender || "",
+            unread_count: 0,
+          }, ...prev];
+        });
+      }
     } catch (err) {
       console.error("Помилка відправки:", err);
       setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -1546,6 +1852,7 @@ export default function ChatPage({ onOpenRandom }) {
   };
 
   const openChat = (chat) => {
+    if (chat.hidden && !hiddenModeRef.current) return;
     skipSmooth.current = true;
     setHistoryIds(new Set());
     setHasMore(false);
@@ -1556,21 +1863,126 @@ export default function ChatPage({ onOpenRandom }) {
     setReplyTo(null);
     setEmojiOpen(false);
     setActiveChat(chat);
-    setChats(prev => {
-      const exists = prev.some(c => c.id === chat.id);
-      if (exists) {
+    const concealed = chat.hidden || hiddenIdsRef.current.has(chat.id);
+    if (concealed) {
+      setHiddenChats(prev => prev.map(c => c.id === chat.id
+        ? { ...c, unread_count: 0, peer_gender: chat.peer_gender ?? c.peer_gender }
+        : c));
+    } else {
+      setChats(prev => {
+        const exists = prev.some(c => c.id === chat.id);
+        if (!exists) return prev;
         return prev.map(c => c.id === chat.id
           ? { ...c, unread_count: 0, peer_gender: chat.peer_gender ?? c.peer_gender }
           : c);
-      }
-      return [{
-        id: chat.id,
-        peer: chat.peer,
-        peer_gender: chat.peer_gender || "",
-        unread_count: 0,
-      }, ...prev];
-    });
+      });
+    }
     markChatRead(chat.id);
+  };
+
+  const lockVault = () => {
+    const ids = hiddenIdsRef.current;
+    const open = activeChatRef.current;
+    setHiddenMode(false);
+    setHiddenChats([]);
+    if (open && ids.has(open.id)) closeChat();
+  };
+
+  const unlockVault = async (code) => {
+    try {
+      const res = await fetch(`${API_URL}/api/hidden/unlock`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ code }),
+      });
+      if (res.status === 401) {
+        clearSession();
+        applyAuth(null);
+        return false;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return false;
+      setHiddenChats(Array.isArray(data.chats) ? data.chats : []);
+      setHiddenMode(true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const postChatAction = async (id, action, body) => {
+    const res = await fetch(`${API_URL}/api/conversations/${id}/${action}`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  };
+
+  const closeHide = () => {
+    setHideTarget(null);
+    setHideStep("ask");
+    setHideError("");
+    setCodeDraft("");
+    setCodeAgain("");
+  };
+
+  const submitHide = async (code, confirm) => {
+    if (!hideTarget) return;
+    const { res, data } = await postChatAction(
+      hideTarget.id,
+      "hide",
+      code ? { code, code_confirm: confirm } : {},
+    );
+    if (res.status === 401) {
+      clearSession();
+      applyAuth(null);
+      return;
+    }
+    if (res.status === 409 && data.error === "code_required") {
+      setHideStep("code");
+      setHideError("");
+      return;
+    }
+    if (!res.ok) {
+      setHideError(data.error === "code mismatch"
+        ? "Коди не співпадають"
+        : "Код має бути від 4 до 8 цифр");
+      setHideStep("code");
+      return;
+    }
+    const id = hideTarget.id;
+    setChats(prev => prev.filter(c => c.id !== id));
+    if (activeChatRef.current?.id === id) closeChat();
+    closeHide();
+  };
+
+  const unhideChat = async (chat) => {
+    const { res } = await postChatAction(chat.id, "unhide");
+    if (res.status === 401) {
+      clearSession();
+      applyAuth(null);
+      return;
+    }
+    if (!res.ok) return;
+    setHiddenChats(prev => prev.filter(c => c.id !== chat.id));
+    loadChats();
+  };
+
+  const dismissChat = async () => {
+    if (!dismissTarget) return;
+    const id = dismissTarget.id;
+    const { res } = await postChatAction(id, "dismiss");
+    setDismissTarget(null);
+    if (res.status === 401) {
+      clearSession();
+      applyAuth(null);
+      return;
+    }
+    if (!res.ok) return;
+    setHiddenChats(prev => prev.filter(c => c.id !== id));
+    if (activeChatRef.current?.id === id) closeChat();
   };
 
   const closeChat = () => {
@@ -1620,6 +2032,7 @@ export default function ChatPage({ onOpenRandom }) {
   const randomInMain = isDesktop && isHead && sidebarMode === "random";
 
   const changeSidebarMode = (mode) => {
+    if (mode !== "chats") lockVault();
     setSidebarMode(mode);
     if ((mode === "stats" || mode === "random") && isDesktop && activeChat) closeChat();
   };
@@ -1633,7 +2046,13 @@ export default function ChatPage({ onOpenRandom }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return;
-      openChat({ id: data.id, peer: data.peer, peer_gender: data.peer_gender || "" });
+      openChat({
+        id: data.id,
+        peer: data.peer,
+        peer_gender: data.peer_gender || "",
+        hidden: !!data.hidden,
+        dismissed: !!data.dismissed,
+      });
     } catch {
     }
   };
@@ -1720,7 +2139,7 @@ export default function ChatPage({ onOpenRandom }) {
       {onOpenRandom && (
         <button
           className="neu-press"
-          onClick={onOpenRandom}
+          onClick={() => { lockVault(); onOpenRandom(); }}
           title="Інкогніто"
           aria-label="Інкогніто"
           style={{
@@ -1800,7 +2219,6 @@ export default function ChatPage({ onOpenRandom }) {
     <ConversationsScreen
       onOpen={openChat}
       onlineUsers={onlineUsers}
-      chats={chats}
       isHead={isHead}
       adminUsers={adminUsers}
       onOpenUser={openUserFromAdmin}
@@ -1813,6 +2231,19 @@ export default function ChatPage({ onOpenRandom }) {
       randomInMain={randomInMain}
       listMode={isHead ? sidebarMode : "chats"}
       onListModeChange={changeSidebarMode}
+      vault={hiddenMode}
+      chats={hiddenMode ? hiddenChats : chats}
+      onUnlock={unlockVault}
+      onLock={lockVault}
+      onHide={(chat) => {
+        setHideTarget(chat);
+        setHideStep("ask");
+        setHideError("");
+        setCodeDraft("");
+        setCodeAgain("");
+      }}
+      onUnhide={unhideChat}
+      onDismiss={setDismissTarget}
     />
   );
 
@@ -1974,7 +2405,7 @@ export default function ChatPage({ onOpenRandom }) {
                   flex: 1, border: "none", outline: "none",
                   background: "transparent",
                   fontFamily: "'Nunito', sans-serif",
-                  fontSize: 13, fontWeight: 600,
+                  fontSize: 16, fontWeight: 600,
                   color: "#4b5563", padding: "13px 0",
                   minWidth: 0,
                 }}
@@ -2048,6 +2479,31 @@ export default function ChatPage({ onOpenRandom }) {
     <>
       <AppStyles />
       <AnnouncementPopup queue={announcements} onAck={ackAnnouncement} />
+      {hideTarget && hideStep === "ask" && (
+        <ConfirmDialog
+          title="Сховати чат?"
+          onNo={closeHide}
+          onYes={() => submitHide()}
+        />
+      )}
+      {hideTarget && hideStep === "code" && (
+        <CodeDialog
+          code={codeDraft}
+          again={codeAgain}
+          error={hideError}
+          onCode={setCodeDraft}
+          onAgain={setCodeAgain}
+          onCancel={closeHide}
+          onSave={() => submitHide(codeDraft, codeAgain)}
+        />
+      )}
+      {dismissTarget && (
+        <ConfirmDialog
+          title="Видалити чат назавжди?"
+          onNo={() => setDismissTarget(null)}
+          onYes={dismissChat}
+        />
+      )}
 
       <div style={{
         minHeight: "100dvh",

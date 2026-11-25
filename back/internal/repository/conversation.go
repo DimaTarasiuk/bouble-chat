@@ -19,8 +19,16 @@ type ConversationRepo interface {
 	FindPair(ctx context.Context, userA, userB int64) (domain.Conversation, error)
 	Create(ctx context.Context, initiatorID, recipientID int64, peer, peerGender string) (domain.Conversation, error)
 	ListForUser(ctx context.Context, userID int64) ([]domain.Conversation, error)
+	ListHiddenForUser(ctx context.Context, userID int64) ([]domain.Conversation, error)
 	GetByID(ctx context.Context, id, userID int64) (domain.Conversation, error)
 	MarkRead(ctx context.Context, conversationID, userID int64) error
+	HideForUser(ctx context.Context, conversationID, userID int64) error
+	UnhideForUser(ctx context.Context, conversationID, userID int64) error
+	DismissForUser(ctx context.Context, conversationID, userID int64) error
+	ClearDismissed(ctx context.Context, conversationID, userID int64) error
+	InboxState(ctx context.Context, conversationID, userID int64) (bool, bool, error)
+	HistoryFloor(ctx context.Context, conversationID, userID int64) (int64, error)
+	BumpHistoryFloor(ctx context.Context, conversationID, userID int64) error
 }
 
 func NewConversationRepository() *ConversationRepository {
@@ -72,23 +80,57 @@ func (r *ConversationRepository) Create(ctx context.Context, initiatorID, recipi
 	return c, nil
 }
 
-func (r *ConversationRepository) ListForUser(ctx context.Context, userID int64) ([]domain.Conversation, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT `+conversationPeerColumns+`,
+const conversationListSelect = `
+		SELECT ` + conversationPeerColumns + `,
 		       (
 		         SELECT COUNT(*)::int
 		         FROM messages m
 		         WHERE m.conversation_id = c.id
 		           AND m.user_id IS DISTINCT FROM $1
-		           AND m.id > COALESCE(cr.last_read_message_id, 0)
+		           AND m.id > GREATEST(
+		                 COALESCE(cr.last_read_message_id, 0),
+		                 COALESCE((SELECT cc.after_message_id FROM conversation_clears cc WHERE cc.conversation_id = c.id AND cc.user_id = $1), 0)
+		               )
 		       )
 		FROM conversations c
-		`+conversationPeerJoin+`
+		` + conversationPeerJoin + `
 		LEFT JOIN conversation_reads cr
 		  ON cr.conversation_id = c.id AND cr.user_id = $1
-		WHERE c.initiator_id = $1 OR c.recipient_id = $1
-		ORDER BY c.created_at DESC
-	`, userID)
+		WHERE (c.initiator_id = $1 OR c.recipient_id = $1)
+		  AND EXISTS (
+		        SELECT 1 FROM messages msg
+		        WHERE msg.conversation_id = c.id
+		          AND msg.id > COALESCE((SELECT cc.after_message_id FROM conversation_clears cc WHERE cc.conversation_id = c.id AND cc.user_id = $1), 0)
+		  )`
+
+func (r *ConversationRepository) ListForUser(ctx context.Context, userID int64) ([]domain.Conversation, error) {
+	return r.listConversations(ctx, userID, conversationListSelect+`
+		  AND NOT EXISTS (
+		        SELECT 1 FROM conversation_hidden h
+		        WHERE h.conversation_id = c.id AND h.user_id = $1
+		  )
+		  AND NOT EXISTS (
+		        SELECT 1 FROM conversation_dismissed d
+		        WHERE d.conversation_id = c.id AND d.user_id = $1
+		  )
+		ORDER BY c.created_at DESC`)
+}
+
+func (r *ConversationRepository) ListHiddenForUser(ctx context.Context, userID int64) ([]domain.Conversation, error) {
+	return r.listConversations(ctx, userID, conversationListSelect+`
+		  AND EXISTS (
+		        SELECT 1 FROM conversation_hidden h
+		        WHERE h.conversation_id = c.id AND h.user_id = $1
+		  )
+		  AND NOT EXISTS (
+		        SELECT 1 FROM conversation_dismissed d
+		        WHERE d.conversation_id = c.id AND d.user_id = $1
+		  )
+		ORDER BY c.created_at DESC`)
+}
+
+func (r *ConversationRepository) listConversations(ctx context.Context, userID int64, query string) ([]domain.Conversation, error) {
+	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +163,117 @@ func (r *ConversationRepository) GetByID(ctx context.Context, id, userID int64) 
 		return domain.Conversation{}, err
 	}
 	return c, nil
+}
+
+func (r *ConversationRepository) HideForUser(ctx context.Context, conversationID, userID int64) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO conversation_hidden (conversation_id, user_id)
+		VALUES ($1, $2)
+		ON CONFLICT (conversation_id, user_id) DO NOTHING
+	`, conversationID, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM conversation_dismissed
+		WHERE conversation_id = $1 AND user_id = $2
+	`, conversationID, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *ConversationRepository) UnhideForUser(ctx context.Context, conversationID, userID int64) error {
+	_, err := r.db.Exec(ctx, `
+		DELETE FROM conversation_hidden
+		WHERE conversation_id = $1 AND user_id = $2
+	`, conversationID, userID)
+	return err
+}
+
+func (r *ConversationRepository) HistoryFloor(ctx context.Context, conversationID, userID int64) (int64, error) {
+	var floor int64
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(after_message_id, 0)
+		FROM conversation_clears
+		WHERE conversation_id = $1 AND user_id = $2
+	`, conversationID, userID).Scan(&floor)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return floor, nil
+}
+
+func (r *ConversationRepository) BumpHistoryFloor(ctx context.Context, conversationID, userID int64) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO conversation_clears (conversation_id, user_id, after_message_id)
+		VALUES (
+			$1,
+			$2,
+			COALESCE((SELECT MAX(id) FROM messages WHERE conversation_id = $1), 0)
+		)
+		ON CONFLICT (conversation_id, user_id)
+		DO UPDATE SET after_message_id = EXCLUDED.after_message_id
+	`, conversationID, userID)
+	return err
+}
+
+func (r *ConversationRepository) DismissForUser(ctx context.Context, conversationID, userID int64) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO conversation_dismissed (conversation_id, user_id)
+		VALUES ($1, $2)
+		ON CONFLICT (conversation_id, user_id) DO NOTHING
+	`, conversationID, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM conversation_hidden
+		WHERE conversation_id = $1 AND user_id = $2
+	`, conversationID, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *ConversationRepository) ClearDismissed(ctx context.Context, conversationID, userID int64) error {
+	_, err := r.db.Exec(ctx, `
+		DELETE FROM conversation_dismissed
+		WHERE conversation_id = $1 AND user_id = $2
+	`, conversationID, userID)
+	return err
+}
+
+func (r *ConversationRepository) InboxState(ctx context.Context, conversationID, userID int64) (bool, bool, error) {
+	var hidden, dismissed bool
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			EXISTS (
+				SELECT 1 FROM conversation_hidden
+				WHERE conversation_id = $1 AND user_id = $2
+			),
+			EXISTS (
+				SELECT 1 FROM conversation_dismissed
+				WHERE conversation_id = $1 AND user_id = $2
+			)
+	`, conversationID, userID).Scan(&hidden, &dismissed)
+	if err != nil {
+		return false, false, err
+	}
+	return hidden, dismissed, nil
 }
 
 func (r *ConversationRepository) MarkRead(ctx context.Context, conversationID, userID int64) error {

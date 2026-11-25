@@ -81,7 +81,7 @@ func (s *ConversationService) FindOrCreate(ctx context.Context, userID int64, pe
 
 	existing, err := s.convs.FindPair(ctx, userID, peer.ID)
 	if err == nil {
-		return existing, nil
+		return s.stampInbox(ctx, userID, existing)
 	}
 	if !errors.Is(err, repository.ErrNotFound) {
 		return domain.Conversation{}, err
@@ -91,11 +91,21 @@ func (s *ConversationService) FindOrCreate(ctx context.Context, userID int64, pe
 	if err != nil {
 		existing, findErr := s.convs.FindPair(ctx, userID, peer.ID)
 		if findErr == nil {
-			return existing, nil
+			return s.stampInbox(ctx, userID, existing)
 		}
 		return domain.Conversation{}, err
 	}
-	return created, nil
+	return s.stampInbox(ctx, userID, created)
+}
+
+func (s *ConversationService) stampInbox(ctx context.Context, userID int64, c domain.Conversation) (domain.Conversation, error) {
+	hidden, dismissed, err := s.convs.InboxState(ctx, c.ID, userID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	c.Hidden = hidden
+	c.Dismissed = dismissed
+	return c, nil
 }
 
 func (s *ConversationService) Get(ctx context.Context, userID, convID int64) (domain.Conversation, error) {
@@ -113,13 +123,29 @@ func (s *ConversationService) Messages(ctx context.Context, userID, convID int64
 	if _, err := s.Get(ctx, userID, convID); err != nil {
 		return nil, err
 	}
+	_, dismissed, err := s.convs.InboxState(ctx, convID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if dismissed {
+		return []domain.Message{}, nil
+	}
+	floor, err := s.convs.HistoryFloor(ctx, convID, userID)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = defaultPageSize
 	}
 	limit = min(limit, maxPageSize)
-	messages, err := s.msgs.ListPage(ctx, convID, beforeID, limit)
+	messages, err := s.msgs.ListPage(ctx, convID, beforeID, floor, limit)
 	if err != nil {
 		return nil, err
+	}
+	for i := range messages {
+		if messages[i].ReplyTo != nil && messages[i].ReplyTo.ID <= floor {
+			messages[i].ReplyTo = nil
+		}
 	}
 	if beforeID == nil {
 		_ = s.convs.MarkRead(ctx, convID, userID)
@@ -156,9 +182,23 @@ func (s *ConversationService) Send(ctx context.Context, userID int64, username s
 			return domain.Message{}, domain.Conversation{}, ErrForbidden
 		}
 	}
+	_, dismissed, err := s.convs.InboxState(ctx, convID, userID)
+	if err != nil {
+		return domain.Message{}, domain.Conversation{}, err
+	}
+	if dismissed {
+		if err := s.convs.BumpHistoryFloor(ctx, convID, userID); err != nil {
+			return domain.Message{}, domain.Conversation{}, err
+		}
+	}
 	msg, err := s.msgs.Create(ctx, convID, userID, username, text, replyToID)
 	if err != nil {
 		return domain.Message{}, domain.Conversation{}, err
+	}
+	if dismissed {
+		if err := s.convs.ClearDismissed(ctx, convID, userID); err != nil {
+			return domain.Message{}, domain.Conversation{}, err
+		}
 	}
 	_ = s.convs.MarkRead(ctx, convID, userID)
 	return msg, conv, nil

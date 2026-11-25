@@ -9,4 +9,6 @@ type Conversation struct {
 	PeerGender  string    `json:"peer_gender"`
 	UnreadCount int       `json:"unread_count"`
 	CreatedAt   time.Time `json:"created_at"`
+	Hidden      bool      `json:"hidden,omitempty"`
+	Dismissed   bool      `json:"dismissed,omitempty"`
 }

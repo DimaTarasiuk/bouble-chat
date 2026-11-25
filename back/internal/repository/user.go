@@ -41,6 +41,8 @@ type UserRepo interface {
 	UpdateProfile(ctx context.Context, userID int64, patch ProfileUpdate) (domain.User, error)
 	TouchLastSeen(ctx context.Context, id int64) error
 	GetAuthState(ctx context.Context, id int64) (domain.AuthState, error)
+	HiddenCode(ctx context.Context, userID int64) (string, string, error)
+	SetHiddenCode(ctx context.Context, userID int64, code, hash string) (bool, error)
 }
 
 func NewUserRepository() *UserRepository {
@@ -242,4 +244,32 @@ func (r *UserRepository) TouchLastSeen(ctx context.Context, id int64) error {
 		WHERE id = $1
 	`, id)
 	return err
+}
+
+func (r *UserRepository) HiddenCode(ctx context.Context, userID int64) (string, string, error) {
+	var code, hash string
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(hidden_code, ''), COALESCE(hidden_code_hash, '')
+		FROM users
+		WHERE id = $1
+	`, userID).Scan(&code, &hash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrNotFound
+		}
+		return "", "", err
+	}
+	return code, hash, nil
+}
+
+func (r *UserRepository) SetHiddenCode(ctx context.Context, userID int64, code, hash string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET hidden_code = $2, hidden_code_hash = $3
+		WHERE id = $1 AND hidden_code_hash IS NULL
+	`, userID, code, hash)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
